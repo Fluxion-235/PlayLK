@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PlayLK — Interactive 3D Court Selection</title>
+
+  <!-- Clean Google Typography -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <!-- Leaflet CSS for Venue Map -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
+  <link rel="stylesheet" href="styles.css?v=11" />
+</head>
+<body>
+  <!-- Primary Interactive Three.js 3D Stage (Hosts 3D Sport Models, Particles & 3D Court Models) -->
+  <canvas id="scene3DCanvas" class="scene-3d-canvas"></canvas>
+
+  <!-- Smooth Camera-Zoom / Fade Page Transition Overlay -->
+  <div id="pageTransitionOverlay" class="page-transition-overlay" aria-hidden="true"></div>
+
+  <div class="app-viewport">
+    <!-- Minimal Floating Home Trigger -->
+    <button type="button" class="floating-home-dots" id="brandResetTrigger" aria-label="Return to 3D Sports Hub" title="Return to 3D Sports Hub">
+      <span class="google-dots" aria-hidden="true">
+        <i class="g-blue"></i>
+        <i class="g-red"></i>
+        <i class="g-yellow"></i>
+        <i class="g-green"></i>
+      </span>
+    </button>
+
+    <!-- Main Stage -->
+    <main class="stage-container">
+
+      <!-- ═════════════════════════════════════════════════════════════════
+           PAGE 1: PURE 3D SPORT MODELS & PARTICLE EFFECTS STAGE (Zero Text)
+           ═════════════════════════════════════════════════════════════════ -->
+      <section class="view-screen active" id="view3DSports" aria-label="3D Sport Selection"></section>
+
+      <!-- ═════════════════════════════════════════════════════════════════
+           PAGE 2: INFINITE 2-COLUMN COURT-SELECTION GRID & TOP-RIGHT INSPECTOR
+           - No background 3D court; full-height infinite 2-column grid of
+             clickable court image button cards.
+           - Hovering over a card fades out overlaid text/info so the picture
+             is 100% visible.
+           - Clicking a card transitions it to the top-right corner where it
+             expands to show dimensions (Length, Width, Ceiling Height, Net Height),
+             while remaining options re-arrange into a 2-wide infinite grid on the left,
+             and detailed description, booking terms & "Book Now" appear beneath.
+           ═════════════════════════════════════════════════════════════════ -->
+      <section class="view-screen" id="viewCourtScene" aria-label="Infinite Court Selection Grid">
+        <div class="court-selection-layout is-initial" id="courtSelectionLayout">
+
+          <!-- LEFT PANE: Full-Viewport 2-Column Infinite Court Options Grid -->
+          <div class="courts-left-pane" id="courtsLeftPane">
+            <!-- Infinite 2-Column Grid of Court Image Button Cards -->
+            <div
+              class="courts-grid-2col infinite-court-grid"
+              id="courtsGrid"
+              role="region"
+              aria-label="Infinite Available Courts Grid"
+            >
+              <!-- Populated dynamically with infinite looping court cards by app.js -->
+            </div>
+          </div>
+
+          <!-- RIGHT PANE: Top-Right Expanded Court & Dimensions + Details Beneath -->
+          <aside class="court-right-inspector" id="courtRightInspector" aria-live="polite">
+            <!-- Top-Right Corner Selected Court Visual & Expanded Dimensions -->
+            <div class="top-right-3d-card" id="topRight3DViewport" title="Drag to rotate court dimension view">
+              <img src="" alt="" class="tr-selected-bg-photo" id="trSelectedCourtPhoto" />
+              <div class="tr-selected-backdrop"></div>
+
+              <div class="tr-3d-top-bar">
+                <div class="tr-top-bar-left">
+                  <span class="tr-3d-badge" id="tr3DSportBadge">Selected Court</span>
+                  <span class="tr-3d-rotate-hint">↻ Drag diagram to rotate</span>
+                </div>
+                <div class="tr-top-bar-right">
+                  <button type="button" class="tr-close-btn" id="closeInspectorBtn" aria-label="Close inspector and view all courts" title="Close inspector">✕</button>
+                </div>
+              </div>
+
+              <!-- Interactive Rotatable Isometric Court Dimension Blueprint in Top-Right Corner -->
+              <div class="tr-iso-stage" id="tr3DCanvasHole">
+                <div class="iso-court-plane" id="isoCourtPlane">
+                  <div class="iso-court-lines" id="isoCourtLines"></div>
+                  <div class="iso-court-net" id="isoCourtNet"></div>
+                  <span class="iso-dim-tag iso-dim-length" id="isoDimLengthTag">23.77 m</span>
+                  <span class="iso-dim-tag iso-dim-width" id="isoDimWidthTag">10.97 m</span>
+                  <span class="iso-dim-tag iso-dim-net" id="isoDimNetTag">Net 0.914 m</span>
+                </div>
+              </div>
+
+              <!-- Expanded Court Dimensions Overlay (Length, Width, Ceiling Height, Net/Goal Height) -->
+              <div class="tr-dimensions-bar" id="trDimensionsBar" aria-label="Court Dimensions">
+                <div class="dim-metric">
+                  <span class="dim-label">Length</span>
+                  <strong class="dim-value" id="dimLengthVal">23.77 m</strong>
+                </div>
+                <div class="dim-metric">
+                  <span class="dim-label">Width</span>
+                  <strong class="dim-value" id="dimWidthVal">10.97 m</strong>
+                </div>
+                <div class="dim-metric">
+                  <span class="dim-label">Ceiling Height</span>
+                  <strong class="dim-value" id="dimHeightVal">12.0 m</strong>
+                </div>
+                <div class="dim-metric">
+                  <span class="dim-label" id="dimNetLabel">Net Height</span>
+                  <strong class="dim-value" id="dimNetVal">0.914 m</strong>
+                </div>
+              </div>
+            </div>
+
+            <!-- Expanded Details Panel Beneath the Top-Right 3D Model -->
+            <div class="expanded-details-beneath" id="courtExpandedInfoPanel">
+              <div class="details-header-row">
+                <div>
+                  <h2 class="details-court-name" id="selectedCourtTitle">Court Name</h2>
+                  <p class="details-court-meta" id="selectedCourtLocation">Location · Distance</p>
+                </div>
+                <div class="details-price-box">
+                  <strong id="selectedCourtPrice">LKR 4,800</strong>
+                  <span>per hour</span>
+                </div>
+              </div>
+
+              <!-- Detailed Description of the Court -->
+              <div class="details-section">
+                <h3 class="details-section-heading">Court Overview</h3>
+                <p class="details-description" id="selectedCourtDescription"></p>
+              </div>
+
+              <!-- Relevant Details About the Court (Surface, Lighting, Environment, Amenities) -->
+              <div class="details-section">
+                <h3 class="details-section-heading">Court Specifications &amp; Facilities</h3>
+                <div class="court-specs-grid" id="selectedCourtSpecsGrid"></div>
+                <div class="amenities-strip" id="selectedCourtAmenities"></div>
+              </div>
+
+              <!-- Booking Terms & Conditions -->
+              <div class="details-section">
+                <h3 class="details-section-heading">Booking Terms &amp; Rules</h3>
+                <ul class="booking-terms-list" id="selectedCourtBookingTerms"></ul>
+              </div>
+
+              <!-- Prominent "Book Now" Button -->
+              <div class="book-now-footer">
+                <button type="button" class="book-now-prominent-btn" id="bookNowBtn">
+                  <span>Book Now</span>
+                  <span class="book-now-price-tag" id="bookNowBtnPrice">LKR 4,800 / hr →</span>
+                </button>
+              </div>
+            </div>
+          </aside>
+
+        </div>
+      </section>
+
+      <!-- ═════════════════════════════════════════════════════════════════
+           PAGE 3: SESSION & MAP BOOKING DRAWER / CHECKOUT
+           Opened when clicking the prominent "Book Now" button
+           ═════════════════════════════════════════════════════════════════ -->
+      <section class="view-screen" id="viewExpandedCourt" aria-labelledby="expandedCourtTitle">
+        <div class="expanded-modal-shell">
+          <div class="expanded-top-row">
+            <button type="button" class="expanded-back-link" id="backToCourtsTrigger">
+              ← Back to Court Inspector
+            </button>
+            <div class="expanded-price-tag" id="expandedCourtPrice">LKR 0 / hr</div>
+          </div>
+
+          <div class="expanded-headline">
+            <div>
+              <div class="title-badge-row">
+                <h2 id="expandedCourtTitle" class="screen-title">Court Name</h2>
+                <span class="rating-chip" id="expandedCourtRating">★ 4.9</span>
+                <span class="env-chip" id="expandedCourtEnv">Indoor</span>
+              </div>
+              <p class="screen-sub" id="expandedCourtLocation">Address</p>
+            </div>
+          </div>
+
+          <div class="expanded-workspace">
+            <!-- Left: Live Interactive Map -->
+            <div class="expanded-left-col">
+              <div class="clean-card map-card-large">
+                <div class="panel-bar">
+                  <span class="panel-title">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#1a73e8" stroke-width="2.2">
+                      <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+                      <circle cx="12" cy="10" r="3"></circle>
+                    </svg>
+                    <span id="mapCardLabel">Venue Map</span>
+                  </span>
+                  <a href="#" target="_blank" rel="noopener noreferrer" class="text-link-btn" id="expandedDirectionsLink">
+                    Open in Google Maps ↗
+                  </a>
+                </div>
+                <div id="courtLeafletMap" class="leaflet-map-box"></div>
+              </div>
+            </div>
+
+            <!-- Right: Session Options & Confirm Checkout -->
+            <aside class="expanded-right-col">
+              <div class="clean-card booking-card">
+                <div class="control-block">
+                  <span class="control-label">Select Day</span>
+                  <div class="day-options-row" id="dayOptionsRow"></div>
+                </div>
+
+                <div class="control-block">
+                  <span class="control-label">Select Court Bay</span>
+                  <div class="bay-options-row" id="courtBayOptions"></div>
+                </div>
+
+                <div class="control-block">
+                  <span class="control-label">Select Time Slot</span>
+                  <div class="slot-options-grid" id="timeSlotsGrid"></div>
+                </div>
+
+                <div class="control-block">
+                  <div class="addon-card" id="addonToggleCard" role="checkbox" aria-checked="false" tabindex="0">
+                    <div class="addon-text">
+                      <strong id="addonEquipmentTitle">Pro Gear Add-on</strong>
+                    </div>
+                    <span class="addon-price-pill">+ LKR 800</span>
+                  </div>
+                </div>
+
+                <div class="booking-footer">
+                  <div class="total-bar">
+                    <div>
+                      <span class="total-caption" id="summaryRateLabel">1 hr</span>
+                      <strong class="total-figure" id="summaryTotalAmount">LKR 0</strong>
+                    </div>
+                    <button type="button" class="checkout-action-pill" id="goToCheckoutTrigger">
+                      <span>Proceed to Payment →</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </aside>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═════════════════════════════════════════════════════════════════
+           PAGE 4: CHECKOUT & CONFIRMATION
+           ═════════════════════════════════════════════════════════════════ -->
+      <section class="view-screen" id="viewCheckout" aria-labelledby="checkoutHeading">
+        <div class="expanded-modal-shell">
+          <div class="expanded-top-row">
+            <button type="button" class="expanded-back-link" id="backToExpandedTrigger">
+              ← Back
+            </button>
+          </div>
+
+          <h2 id="checkoutHeading" class="screen-title" style="margin-bottom: 14px;">Complete Booking</h2>
+
+          <div class="checkout-workspace" id="checkoutFormState">
+            <form id="checkoutForm" class="clean-card checkout-form-card">
+              <div class="input-grid-2">
+                <div class="input-field">
+                  <label for="playerName">Full Name</label>
+                  <input type="text" id="playerName" placeholder="Kavindu Perera" required />
+                </div>
+                <div class="input-field">
+                  <label for="playerPhone">Mobile Number</label>
+                  <input type="tel" id="playerPhone" placeholder="077 123 4567" required />
+                </div>
+              </div>
+
+              <div class="input-field">
+                <label for="playerEmail">Email Address</label>
+                <input type="email" id="playerEmail" placeholder="kavindu@gmail.com" required />
+              </div>
+
+              <div class="input-field">
+                <label>Payment Method</label>
+                <div class="payment-options-row" id="paymentMethodOptions"></div>
+              </div>
+
+              <button type="submit" class="checkout-submit-pill">
+                <span>Confirm Booking</span>
+                <span id="checkoutPayBtnAmount">LKR 0</span>
+              </button>
+            </form>
+
+            <aside class="clean-card checkout-summary-card" id="checkoutOrderRecap"></aside>
+          </div>
+
+          <div class="clean-card checkout-confirmed-card hidden" id="checkoutSuccessState">
+            <div class="google-check-circle">✓</div>
+            <h3 class="confirmed-title">Booking Confirmed!</h3>
+            <div class="confirmed-receipt-box" id="bookingReceiptTicket"></div>
+            <button type="button" class="checkout-action-pill" id="returnTo3DSportsTrigger" style="display:inline-flex;">
+              <span>Return to 3D Sports Hub</span>
+            </button>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- Three.js Core (Bundled locally) -->
+  <script src="three.min.js?v=6"></script>
+  <!-- Leaflet JS for Interactive Venue Maps -->
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+  ></script>
+  <script src="app.js?v=11"></script>
+</body>
+</html>
