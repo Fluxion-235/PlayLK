@@ -2,13 +2,15 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#f4f7fb" />
+  <meta name="description" content="PlayLK — Interactive 3D Court Selection & Instant Sports Venue Booking across Colombo." />
   <title>PlayLK — Interactive 3D Court Selection</title>
 
   <!-- Clean Google Typography -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 
   <!-- Leaflet CSS for Venue Map -->
   <link
@@ -17,7 +19,7 @@
     integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
     crossorigin=""
   />
-  <link rel="stylesheet" href="styles.css?v=11" />
+  <link rel="stylesheet" href="styles.css?v=15" />
 </head>
 <body>
   <!-- Primary Interactive Three.js 3D Stage (Hosts 3D Sport Models, Particles & 3D Court Models) -->
@@ -46,210 +48,380 @@
       <section class="view-screen active" id="view3DSports" aria-label="3D Sport Selection"></section>
 
       <!-- ═════════════════════════════════════════════════════════════════
-           PAGE 2: INFINITE 2-COLUMN COURT-SELECTION GRID & TOP-RIGHT INSPECTOR
-           - No background 3D court; full-height infinite 2-column grid of
-             clickable court image button cards.
-           - Hovering over a card fades out overlaid text/info so the picture
-             is 100% visible.
-           - Clicking a card transitions it to the top-right corner where it
-             expands to show dimensions (Length, Width, Ceiling Height, Net Height),
-             while remaining options re-arrange into a 2-wide infinite grid on the left,
-             and detailed description, booking terms & "Book Now" appear beneath.
+           PAGE 2: NORMAL COURT-SELECTION GRID & 3-COLUMN SELECTED COURT STUDIO
+           - Initial State: Clean normal 2-column grid of clickable court cards.
+             Hovering over a card fades out overlaid text so the picture is 100% visible.
+           - Selected State: Redesigned 3-column view:
+             1) Left Column: Selected court picture + interactive picture gallery +
+                rotatable 3D court view with dimensions (Length, Width, Ceiling, Net).
+             2) Middle Column: Detailed court info, specifications, facilities, rules,
+                and venue location with live interactive map.
+             3) Right Column: Pricing details, interactive booking details (day, bay,
+                time slot, duration, players), extra costs & what triggers them, and
+                prominent "Book Now" action.
            ═════════════════════════════════════════════════════════════════ -->
-      <section class="view-screen" id="viewCourtScene" aria-label="Infinite Court Selection Grid">
+      <section class="view-screen" id="viewCourtScene" aria-label="Court Selection and Inspector">
         <div class="court-selection-layout is-initial" id="courtSelectionLayout">
 
-          <!-- LEFT PANE: Full-Viewport 2-Column Infinite Court Options Grid -->
+          <!-- INITIAL STATE: Normal Court Selection Grid -->
           <div class="courts-left-pane" id="courtsLeftPane">
-            <!-- Infinite 2-Column Grid of Court Image Button Cards -->
+            <div class="grid-top-header-bar">
+              <div class="grid-header-left">
+                <button
+                  type="button"
+                  class="studio-back-btn"
+                  id="gridBackToHubBtn"
+                  aria-label="Back to 3D Sports Hub"
+                >
+                  ← 3D Sports
+                </button>
+                <div class="grid-sport-switcher" id="gridSportSwitcher" role="tablist" aria-label="Select Sport"></div>
+              </div>
+              <span class="grid-venue-count-pill" id="gridVenueCountBadge">4 Verified Venues · Select a court</span>
+            </div>
+
             <div
-              class="courts-grid-2col infinite-court-grid"
+              class="courts-grid-2col normal-court-grid"
               id="courtsGrid"
               role="region"
-              aria-label="Infinite Available Courts Grid"
+              aria-label="Available Courts Grid"
             >
-              <!-- Populated dynamically with infinite looping court cards by app.js -->
+              <!-- Populated dynamically with court cards by app.js -->
             </div>
           </div>
 
-          <!-- RIGHT PANE: Top-Right Expanded Court & Dimensions + Details Beneath -->
-          <aside class="court-right-inspector" id="courtRightInspector" aria-live="polite">
-            <!-- Top-Right Corner Selected Court Visual & Expanded Dimensions -->
-            <div class="top-right-3d-card" id="topRight3DViewport" title="Drag to rotate court dimension view">
-              <img src="" alt="" class="tr-selected-bg-photo" id="trSelectedCourtPhoto" />
-              <div class="tr-selected-backdrop"></div>
-
-              <div class="tr-3d-top-bar">
-                <div class="tr-top-bar-left">
-                  <span class="tr-3d-badge" id="tr3DSportBadge">Selected Court</span>
-                  <span class="tr-3d-rotate-hint">↻ Drag diagram to rotate</span>
-                </div>
-                <div class="tr-top-bar-right">
-                  <button type="button" class="tr-close-btn" id="closeInspectorBtn" aria-label="Close inspector and view all courts" title="Close inspector">✕</button>
-                </div>
-              </div>
-
-              <!-- Interactive Rotatable Isometric Court Dimension Blueprint in Top-Right Corner -->
-              <div class="tr-iso-stage" id="tr3DCanvasHole">
-                <div class="iso-court-plane" id="isoCourtPlane">
-                  <div class="iso-court-lines" id="isoCourtLines"></div>
-                  <div class="iso-court-net" id="isoCourtNet"></div>
-                  <span class="iso-dim-tag iso-dim-length" id="isoDimLengthTag">23.77 m</span>
-                  <span class="iso-dim-tag iso-dim-width" id="isoDimWidthTag">10.97 m</span>
-                  <span class="iso-dim-tag iso-dim-net" id="isoDimNetTag">Net 0.914 m</span>
-                </div>
-              </div>
-
-              <!-- Expanded Court Dimensions Overlay (Length, Width, Ceiling Height, Net/Goal Height) -->
-              <div class="tr-dimensions-bar" id="trDimensionsBar" aria-label="Court Dimensions">
-                <div class="dim-metric">
-                  <span class="dim-label">Length</span>
-                  <strong class="dim-value" id="dimLengthVal">23.77 m</strong>
-                </div>
-                <div class="dim-metric">
-                  <span class="dim-label">Width</span>
-                  <strong class="dim-value" id="dimWidthVal">10.97 m</strong>
-                </div>
-                <div class="dim-metric">
-                  <span class="dim-label">Ceiling Height</span>
-                  <strong class="dim-value" id="dimHeightVal">12.0 m</strong>
-                </div>
-                <div class="dim-metric">
-                  <span class="dim-label" id="dimNetLabel">Net Height</span>
-                  <strong class="dim-value" id="dimNetVal">0.914 m</strong>
-                </div>
-              </div>
+          <!-- SELECTED STATE: Redesigned 3-Column Court Detail View -->
+          <div class="court-right-inspector selected-court-studio" id="courtRightInspector" aria-live="polite">
+            <!-- Top Navigation Bar for Selected Court View -->
+            <div class="selected-studio-topbar">
+              <button
+                type="button"
+                class="studio-back-btn"
+                id="closeInspectorBtn"
+                aria-label="Back to all courts grid"
+              >
+                ← Back to Courts
+              </button>
+              <div class="studio-court-switcher" id="selectedCourtSwitcher" role="tablist" aria-label="Switch court"></div>
+              <span class="tr-3d-badge" id="tr3DSportBadge">Selected Court</span>
             </div>
 
-            <!-- Expanded Details Panel Beneath the Top-Right 3D Model -->
-            <div class="expanded-details-beneath" id="courtExpandedInfoPanel">
-              <div class="details-header-row">
-                <div>
-                  <h2 class="details-court-name" id="selectedCourtTitle">Court Name</h2>
-                  <p class="details-court-meta" id="selectedCourtLocation">Location · Distance</p>
-                </div>
-                <div class="details-price-box">
-                  <strong id="selectedCourtPrice">LKR 4,800</strong>
-                  <span>per hour</span>
-                </div>
-              </div>
-
-              <!-- Detailed Description of the Court -->
-              <div class="details-section">
-                <h3 class="details-section-heading">Court Overview</h3>
-                <p class="details-description" id="selectedCourtDescription"></p>
-              </div>
-
-              <!-- Relevant Details About the Court (Surface, Lighting, Environment, Amenities) -->
-              <div class="details-section">
-                <h3 class="details-section-heading">Court Specifications &amp; Facilities</h3>
-                <div class="court-specs-grid" id="selectedCourtSpecsGrid"></div>
-                <div class="amenities-strip" id="selectedCourtAmenities"></div>
-              </div>
-
-              <!-- Booking Terms & Conditions -->
-              <div class="details-section">
-                <h3 class="details-section-heading">Booking Terms &amp; Rules</h3>
-                <ul class="booking-terms-list" id="selectedCourtBookingTerms"></ul>
-              </div>
-
-              <!-- Prominent "Book Now" Button -->
-              <div class="book-now-footer">
-                <button type="button" class="book-now-prominent-btn" id="bookNowBtn">
-                  <span>Book Now</span>
-                  <span class="book-now-price-tag" id="bookNowBtnPrice">LKR 4,800 / hr →</span>
-                </button>
-              </div>
-            </div>
-          </aside>
-
-        </div>
-      </section>
-
-      <!-- ═════════════════════════════════════════════════════════════════
-           PAGE 3: SESSION & MAP BOOKING DRAWER / CHECKOUT
-           Opened when clicking the prominent "Book Now" button
-           ═════════════════════════════════════════════════════════════════ -->
-      <section class="view-screen" id="viewExpandedCourt" aria-labelledby="expandedCourtTitle">
-        <div class="expanded-modal-shell">
-          <div class="expanded-top-row">
-            <button type="button" class="expanded-back-link" id="backToCourtsTrigger">
-              ← Back to Court Inspector
-            </button>
-            <div class="expanded-price-tag" id="expandedCourtPrice">LKR 0 / hr</div>
-          </div>
-
-          <div class="expanded-headline">
-            <div>
-              <div class="title-badge-row">
-                <h2 id="expandedCourtTitle" class="screen-title">Court Name</h2>
-                <span class="rating-chip" id="expandedCourtRating">★ 4.9</span>
-                <span class="env-chip" id="expandedCourtEnv">Indoor</span>
-              </div>
-              <p class="screen-sub" id="expandedCourtLocation">Address</p>
-            </div>
-          </div>
-
-          <div class="expanded-workspace">
-            <!-- Left: Live Interactive Map -->
-            <div class="expanded-left-col">
-              <div class="clean-card map-card-large">
-                <div class="panel-bar">
-                  <span class="panel-title">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#1a73e8" stroke-width="2.2">
-                      <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
-                      <circle cx="12" cy="10" r="3"></circle>
-                    </svg>
-                    <span id="mapCardLabel">Venue Map</span>
-                  </span>
-                  <a href="#" target="_blank" rel="noopener noreferrer" class="text-link-btn" id="expandedDirectionsLink">
-                    Open in Google Maps ↗
-                  </a>
-                </div>
-                <div id="courtLeafletMap" class="leaflet-map-box"></div>
-              </div>
+            <!-- Mobile / Tablet Quick-Jump Section Tabs (Visible on <= 1120px) -->
+            <div class="mobile-studio-tabs" id="mobileStudioTabs" role="navigation" aria-label="Jump to section">
+              <button type="button" class="mobile-tab-pill active" data-target="studioColVisuals">📸 Visuals &amp; 3D</button>
+              <button type="button" class="mobile-tab-pill" data-target="courtExpandedInfoPanel">📋 Court &amp; Map</button>
+              <button type="button" class="mobile-tab-pill" data-target="studioColPricing">📅 Book &amp; Price</button>
             </div>
 
-            <!-- Right: Session Options & Confirm Checkout -->
-            <aside class="expanded-right-col">
-              <div class="clean-card booking-card">
-                <div class="control-block">
-                  <span class="control-label">Select Day</span>
-                  <div class="day-options-row" id="dayOptionsRow"></div>
-                </div>
+            <!-- 3-Column Redesign Grid -->
+            <div class="selected-3col-grid" id="selected3ColGrid">
 
-                <div class="control-block">
-                  <span class="control-label">Select Court Bay</span>
-                  <div class="bay-options-row" id="courtBayOptions"></div>
-                </div>
-
-                <div class="control-block">
-                  <span class="control-label">Select Time Slot</span>
-                  <div class="slot-options-grid" id="timeSlotsGrid"></div>
-                </div>
-
-                <div class="control-block">
-                  <div class="addon-card" id="addonToggleCard" role="checkbox" aria-checked="false" tabindex="0">
-                    <div class="addon-text">
-                      <strong id="addonEquipmentTitle">Pro Gear Add-on</strong>
+              <!-- ─── COLUMN 1: Picture + Picture Gallery + 3D View with Dimensions ─── -->
+              <div class="studio-col studio-col-visuals" id="studioColVisuals">
+                <!-- Main Hero Picture Card -->
+                <div class="hero-photo-card" id="selectedPhotoCard">
+                  <img src="" alt="" class="tr-selected-bg-photo hero-main-photo" id="trSelectedCourtPhoto" />
+                  <div class="hero-photo-gradient"></div>
+                  <div class="hero-photo-topbar">
+                    <span class="hero-photo-counter" id="selectedPhotoCaption">1 / 4 · Main Court View</span>
+                    <div class="hero-photo-nav">
+                      <button type="button" class="gallery-nav-btn" id="galleryPrevBtn" aria-label="Previous photo">‹</button>
+                      <button type="button" class="gallery-nav-btn" id="galleryNextBtn" aria-label="Next photo">›</button>
                     </div>
-                    <span class="addon-price-pill">+ LKR 800</span>
                   </div>
                 </div>
 
-                <div class="booking-footer">
-                  <div class="total-bar">
+                <!-- Interactive Picture Gallery Strip -->
+                <div class="gallery-strip-card">
+                  <div class="gallery-strip-header">
+                    <span class="sub-panel-label">Court Photo Gallery</span>
+                    <span class="sub-panel-hint">Click thumbnail to preview</span>
+                  </div>
+                  <div class="court-gallery-strip" id="courtGalleryStrip" role="list" aria-label="Court photo gallery"></div>
+                </div>
+
+                <!-- Interactive 3D Court View & Dimensions Card -->
+                <div class="top-right-3d-card studio-3d-card" id="topRight3DViewport" title="Drag to rotate 3D court dimension view">
+                  <div class="tr-selected-backdrop"></div>
+
+                  <div class="tr-3d-top-bar">
+                    <div class="tr-top-bar-left">
+                      <span class="tr-3d-title-pill">3D Court Dimensions</span>
+                      <span class="tr-3d-rotate-hint">↻ Drag 3D model to rotate</span>
+                    </div>
+                    <div class="tr-top-bar-right">
+                      <button type="button" class="tr-reset-angle-btn" id="resetIsoAngleBtn" title="Reset 3D angle">Reset 3D</button>
+                    </div>
+                  </div>
+
+                  <!-- Interactive Rotatable 3D Isometric Court Blueprint -->
+                  <div class="tr-iso-stage" id="tr3DCanvasHole">
+                    <div class="iso-court-plane" id="isoCourtPlane">
+                      <div class="iso-court-lines" id="isoCourtLines"></div>
+                      <div class="iso-court-net" id="isoCourtNet"></div>
+                      <span class="iso-dim-tag iso-dim-length" id="isoDimLengthTag">23.77 m</span>
+                      <span class="iso-dim-tag iso-dim-width" id="isoDimWidthTag">10.97 m</span>
+                      <span class="iso-dim-tag iso-dim-net" id="isoDimNetTag">Net 0.914 m</span>
+                    </div>
+                  </div>
+
+                  <!-- Court Dimensions Bar (Length, Width, Ceiling Height, Net/Goal Height) -->
+                  <div class="tr-dimensions-bar" id="trDimensionsBar" aria-label="Court Dimensions">
+                    <div class="dim-metric">
+                      <span class="dim-label">Length</span>
+                      <strong class="dim-value" id="dimLengthVal">23.77 m</strong>
+                    </div>
+                    <div class="dim-metric">
+                      <span class="dim-label">Width</span>
+                      <strong class="dim-value" id="dimWidthVal">10.97 m</strong>
+                    </div>
+                    <div class="dim-metric">
+                      <span class="dim-label">Ceiling Height</span>
+                      <strong class="dim-value" id="dimHeightVal">12.0 m</strong>
+                    </div>
+                    <div class="dim-metric">
+                      <span class="dim-label" id="dimNetLabel">Net Height</span>
+                      <strong class="dim-value" id="dimNetVal">0.914 m</strong>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- ─── COLUMN 2 (MIDDLE): Court Information & Venue Location ─── -->
+              <div class="studio-col studio-col-info" id="courtExpandedInfoPanel">
+                <!-- Court Header & Overview -->
+                <div class="studio-panel-card">
+                  <div class="details-header-row">
                     <div>
-                      <span class="total-caption" id="summaryRateLabel">1 hr</span>
+                      <div class="title-badge-row">
+                        <h2 class="details-court-name" id="selectedCourtTitle" tabindex="-1">Court Name</h2>
+                      </div>
+                      <div class="court-meta-badges">
+                        <span class="rating-chip" id="expandedCourtRating">★ 4.9</span>
+                        <span class="env-chip" id="expandedCourtEnv">Indoor AC</span>
+                        <span class="distance-chip" id="selectedCourtDistanceBadge">1.1 km away</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="details-section">
+                    <h3 class="details-section-heading">
+                      <span class="heading-icon-dot"></span>
+                      Court Information &amp; Overview
+                    </h3>
+                    <p class="details-description" id="selectedCourtDescription"></p>
+                  </div>
+
+                  <!-- Specifications & Facilities -->
+                  <div class="details-section">
+                    <h3 class="details-section-heading">
+                      <span class="heading-icon-dot"></span>
+                      Court Specifications &amp; Facilities
+                    </h3>
+                    <div class="court-specs-grid" id="selectedCourtSpecsGrid"></div>
+                    <div class="amenities-strip" id="selectedCourtAmenities"></div>
+                  </div>
+
+                  <!-- Booking Terms & Rules -->
+                  <div class="details-section">
+                    <h3 class="details-section-heading">
+                      <span class="heading-icon-dot"></span>
+                      Venue Rules &amp; Guidelines
+                    </h3>
+                    <ul class="booking-terms-list" id="selectedCourtBookingTerms"></ul>
+                  </div>
+                </div>
+
+                <!-- Court Location & Interactive Map -->
+                <div class="studio-panel-card studio-location-card">
+                  <div class="panel-bar">
+                    <span class="panel-title">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#1a73e8" stroke-width="2.2">
+                        <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+                        <circle cx="12" cy="10" r="3"></circle>
+                      </svg>
+                      <span id="mapCardLabel">Court Location &amp; Map</span>
+                    </span>
+                    <a href="#" target="_blank" rel="noopener noreferrer" class="text-link-btn" id="expandedDirectionsLink">
+                      Open in Google Maps ↗
+                    </a>
+                  </div>
+                  <p class="location-address-line" id="selectedCourtLocation">Address · Distance</p>
+                  <div id="courtLeafletMap" class="leaflet-map-box studio-map-box"></div>
+                </div>
+              </div>
+
+              <!-- ─── COLUMN 3 (RIGHT): Pricing Details, Booking Details, Extra Costs & Triggers ─── -->
+              <div class="studio-col studio-col-pricing" id="studioColPricing">
+                <div class="studio-panel-card pricing-booking-shell">
+                  <!-- Pricing Details Header -->
+                  <div class="pricing-header-block">
+                    <div>
+                      <span class="details-section-heading">Pricing Details</span>
+                      <div class="pricing-main-figure">
+                        <strong id="selectedCourtPrice">LKR 4,800</strong>
+                        <span>/ hour base rate</span>
+                      </div>
+                    </div>
+                    <span class="pricing-tier-pill" id="pricingTierBadge">Off-Peak Standard</span>
+                  </div>
+
+                  <!-- Booking Details Configuration -->
+                  <div class="booking-controls-section">
+                    <h3 class="details-section-heading">Booking Details</h3>
+
+                    <!-- Interactive Booking Calendar -->
+                    <div class="control-block calendar-control-block">
+                      <div class="calendar-header-bar">
+                        <span class="control-label">
+                          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                            <rect x="3" y="4" width="18" height="18" rx="3" ry="3"></rect>
+                            <line x1="16" y1="2" x2="16" y2="6"></line>
+                            <line x1="8" y1="2" x2="8" y2="6"></line>
+                            <line x1="3" y1="10" x2="21" y2="10"></line>
+                          </svg>
+                          Select Booking Date
+                        </span>
+                        <div class="calendar-month-nav">
+                          <button type="button" class="cal-nav-btn" id="calPrevMonthBtn" aria-label="Previous month" title="Previous month">‹</button>
+                          <span class="cal-month-title" id="calMonthTitle">November 2026</span>
+                          <button type="button" class="cal-nav-btn" id="calNextMonthBtn" aria-label="Next month" title="Next month">›</button>
+                        </div>
+                      </div>
+
+                      <!-- Quick Shortcut Pills (Today, Tomorrow, Weekend) -->
+                      <div class="calendar-shortcuts-row">
+                        <button type="button" class="cal-shortcut-pill active" id="calQuickToday">Today</button>
+                        <button type="button" class="cal-shortcut-pill" id="calQuickTomorrow">Tomorrow</button>
+                        <button type="button" class="cal-shortcut-pill" id="calQuickWeekend">This Weekend</button>
+                      </div>
+
+                      <!-- Inline Interactive Calendar Grid -->
+                      <div class="inline-calendar-box">
+                        <div class="calendar-weekdays-row" aria-hidden="true">
+                          <span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span class="wknd-header">Sa</span><span class="wknd-header">Su</span>
+                        </div>
+                        <div class="calendar-days-grid" id="calendarDaysGrid" role="grid" aria-label="Select booking date">
+                          <!-- Populated dynamically by app.js -->
+                        </div>
+                      </div>
+
+                      <!-- Selected Date Confirmation Banner -->
+                      <div class="calendar-selected-banner" id="calSelectedDateBanner">
+                        <span class="cal-banner-icon">📅</span>
+                        <span class="cal-banner-text" id="calSelectedBannerText">Monday, Nov 9, 2026 · Standard Rate</span>
+                      </div>
+                    </div>
+
+                    <div class="control-block">
+                      <span class="control-label">Select Court Bay</span>
+                      <div class="bay-options-row" id="courtBayOptions"></div>
+                    </div>
+
+                    <div class="control-block">
+                      <span class="control-label">Select Time Slot <small class="slot-hint">(6 PM+ triggers floodlight peak rate)</small></span>
+                      <div class="slot-options-grid" id="timeSlotsGrid"></div>
+                    </div>
+
+                    <div class="duration-players-row">
+                      <div class="control-block">
+                        <span class="control-label">Duration</span>
+                        <div class="duration-options-row" id="durationOptionsRow"></div>
+                      </div>
+                      <div class="control-block">
+                        <span class="control-label" id="playerCapLabel">Players (Std: 4)</span>
+                        <div class="player-stepper">
+                          <button type="button" class="stepper-btn" id="playerCountMinus" aria-label="Decrease players">−</button>
+                          <strong class="stepper-val" id="playerCountValue">4</strong>
+                          <button type="button" class="stepper-btn" id="playerCountPlus" aria-label="Increase players">+</button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Extra Costs & What Triggers Them -->
+                  <div class="extra-costs-section">
+                    <div class="extra-costs-header">
+                      <h3 class="details-section-heading">Extra Costs &amp; What Triggers Them</h3>
+                      <span class="extra-costs-sub">Auto-applied or toggleable</span>
+                    </div>
+
+                    <div class="extra-costs-list" id="extraCostsTriggerList">
+                      <!-- Populated dynamically with live trigger states by app.js -->
+                    </div>
+
+                    <!-- Interactive Add-on Toggle kept for direct accessibility & compatibility -->
+                    <div class="addon-card" id="addonToggleCard" role="checkbox" aria-checked="false" tabindex="0">
+                      <div class="addon-text">
+                        <strong id="addonEquipmentTitle">Pro Gear Rental Pack</strong>
+                        <span class="addon-trigger-desc">Triggered when opting in for racquets/paddles/balls</span>
+                      </div>
+                      <span class="addon-price-pill">+ LKR 800</span>
+                    </div>
+
+                    <div class="addon-card" id="replayToggleCard" role="checkbox" aria-checked="false" tabindex="0">
+                      <div class="addon-text">
+                        <strong>AI Match Video Replay &amp; Chilled Towels</strong>
+                        <span class="addon-trigger-desc">Triggered when enabling court camera recording</span>
+                      </div>
+                      <span class="addon-price-pill">+ LKR 650</span>
+                    </div>
+                  </div>
+
+                  <!-- Live Itemized Pricing Breakdown -->
+                  <div class="live-price-breakdown" id="livePriceBreakdown"></div>
+
+                  <!-- Prominent Book Now / Checkout Footer -->
+                  <div class="book-now-footer">
+                    <div class="summary-meta-line">
+                      <span class="total-caption" id="summaryRateLabel">Today · 06:00 PM · 1 hr</span>
                       <strong class="total-figure" id="summaryTotalAmount">LKR 0</strong>
                     </div>
-                    <button type="button" class="checkout-action-pill" id="goToCheckoutTrigger">
-                      <span>Proceed to Payment →</span>
+                    <button type="button" class="book-now-prominent-btn" id="bookNowBtn">
+                      <span>Book Now · Proceed to Checkout</span>
+                      <span class="book-now-price-tag" id="bookNowBtnPrice">LKR 4,800 →</span>
                     </button>
                   </div>
                 </div>
               </div>
-            </aside>
+
+            </div>
+
+            <!-- Mobile / Tablet Sticky Bottom Booking Bar -->
+            <div class="mobile-sticky-book-bar" id="mobileStickyBookBar">
+              <div class="mobile-sticky-price-col">
+                <strong class="mobile-sticky-total" id="mobileStickyTotalAmount">LKR 4,800</strong>
+                <span class="mobile-sticky-meta" id="mobileStickyRateLabel">Today · 06:00 PM · 1 hr</span>
+              </div>
+              <div class="mobile-sticky-actions">
+                <button type="button" class="mobile-jump-slots-btn" id="mobileJumpToSlotsBtn"> Customize</button>
+                <button type="button" class="mobile-sticky-book-btn" id="mobileBookNowBtn">Book Now →</button>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- Legacy Expanded Court Section kept for compatibility if triggered directly -->
+      <section class="view-screen" id="viewExpandedCourt" aria-labelledby="expandedCourtTitle">
+        <div class="expanded-modal-shell">
+          <div class="expanded-top-row">
+            <button type="button" class="expanded-back-link" id="backToCourtsTrigger">
+              ← Back to Court Studio
+            </button>
+            <div class="expanded-price-tag" id="expandedCourtPrice">LKR 0 / hr</div>
+          </div>
+          <div class="expanded-headline">
+            <div class="title-badge-row">
+              <h2 id="expandedCourtTitle" class="screen-title">Court Name</h2>
+            </div>
+            <p class="screen-sub" id="expandedCourtLocation">Address</p>
+          </div>
+          <div class="booking-footer">
+            <button type="button" class="checkout-action-pill" id="goToCheckoutTrigger">
+              <span>Proceed to Payment →</span>
+            </button>
           </div>
         </div>
       </section>
@@ -258,54 +430,134 @@
            PAGE 4: CHECKOUT & CONFIRMATION
            ═════════════════════════════════════════════════════════════════ -->
       <section class="view-screen" id="viewCheckout" aria-labelledby="checkoutHeading">
-        <div class="expanded-modal-shell">
-          <div class="expanded-top-row">
-            <button type="button" class="expanded-back-link" id="backToExpandedTrigger">
-              ← Back
+        <div class="checkout-container-shell">
+          <!-- Top Header Navigation & Stepper -->
+          <div class="checkout-header-bar">
+            <button type="button" class="checkout-back-btn" id="backToExpandedTrigger">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4">
+                <line x1="19" y1="12" x2="5" y2="12"></line>
+                <polyline points="12 19 5 12 12 5"></polyline>
+              </svg>
+              <span>Back to Court Studio</span>
             </button>
+            <div class="checkout-stepper-pills" aria-hidden="true">
+              <span class="step-pill completed">✓ 1. Sport &amp; Court</span>
+              <span class="step-divider">›</span>
+              <span class="step-pill completed">✓ 2. Date &amp; Slot</span>
+              <span class="step-divider">›</span>
+              <span class="step-pill active">3. Review &amp; Pay</span>
+            </div>
+            <div class="checkout-secure-badge">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+              </svg>
+              <span>256-bit SSL Secure</span>
+            </div>
           </div>
 
-          <h2 id="checkoutHeading" class="screen-title" style="margin-bottom: 14px;">Complete Booking</h2>
+          <div class="checkout-title-group">
+            <h2 id="checkoutHeading" class="checkout-main-title">Complete Your Booking</h2>
+            <p class="checkout-sub-title">Review your session details, provide player contact info for gate PIN delivery, and choose payment.</p>
+          </div>
 
           <div class="checkout-workspace" id="checkoutFormState">
+            <!-- Left Form Column -->
             <form id="checkoutForm" class="clean-card checkout-form-card">
+              <!-- Section 1: Player Info -->
+              <div class="checkout-section-title-row">
+                <span class="checkout-step-badge">1</span>
+                <div>
+                  <h3 class="checkout-section-title">Player Contact Information</h3>
+                  <span class="checkout-section-sub">Required for electronic gate PIN &amp; instant SMS voucher</span>
+                </div>
+              </div>
+
               <div class="input-grid-2">
                 <div class="input-field">
-                  <label for="playerName">Full Name</label>
-                  <input type="text" id="playerName" placeholder="Kavindu Perera" required />
+                  <label for="playerName">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                      <circle cx="12" cy="7" r="4"></circle>
+                    </svg>
+                    Full Name
+                  </label>
+                  <input type="text" id="playerName" autocomplete="name" placeholder="e.g. Kavindu Perera" required />
                 </div>
                 <div class="input-field">
-                  <label for="playerPhone">Mobile Number</label>
-                  <input type="tel" id="playerPhone" placeholder="077 123 4567" required />
+                  <label for="playerPhone">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path>
+                    </svg>
+                    Mobile Number
+                  </label>
+                  <input type="tel" id="playerPhone" inputmode="tel" autocomplete="tel" placeholder="077 123 4567" required />
+                  <span class="field-hint-text">Gate PIN SMS sent here 15 mins prior</span>
                 </div>
               </div>
 
               <div class="input-field">
-                <label for="playerEmail">Email Address</label>
-                <input type="email" id="playerEmail" placeholder="kavindu@gmail.com" required />
+                <label for="playerEmail">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+                    <polyline points="22,6 12,13 2,6"></polyline>
+                  </svg>
+                  Email Address
+                </label>
+                <input type="email" id="playerEmail" inputmode="email" autocomplete="email" placeholder="kavindu@gmail.com" required />
+                <span class="field-hint-text">Calendar invite &amp; tax receipt will be sent to this email</span>
               </div>
 
-              <div class="input-field">
-                <label>Payment Method</label>
-                <div class="payment-options-row" id="paymentMethodOptions"></div>
+              <!-- Section 2: Payment Method -->
+              <div class="checkout-section-title-row" style="margin-top: 24px;">
+                <span class="checkout-step-badge">2</span>
+                <div>
+                  <h3 class="checkout-section-title">Select Payment Method</h3>
+                  <span class="checkout-section-sub">Zero card transaction fees · Instant gate PIN delivery</span>
+                </div>
               </div>
 
-              <button type="submit" class="checkout-submit-pill">
-                <span>Confirm Booking</span>
-                <span id="checkoutPayBtnAmount">LKR 0</span>
+              <div class="payment-options-row" id="paymentMethodOptions"></div>
+
+              <!-- Submit Button -->
+              <button type="submit" class="checkout-submit-btn" id="confirmBookingBtn">
+                <span class="submit-btn-content">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                    <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                  </svg>
+                  <span>Confirm &amp; Reserve Court</span>
+                </span>
+                <span class="submit-btn-price" id="checkoutPayBtnAmount">LKR 0</span>
               </button>
+
+              <div class="checkout-trust-banner">
+                <span class="trust-item">🛡️ 100% Weather Protection</span>
+                <span class="trust-divider">•</span>
+                <span class="trust-item">⚡ Instant Gate PIN</span>
+                <span class="trust-divider">•</span>
+                <span class="trust-item">🔄 Free Cancellation (12h)</span>
+              </div>
             </form>
 
+            <!-- Right Summary Column -->
             <aside class="clean-card checkout-summary-card" id="checkoutOrderRecap"></aside>
           </div>
 
+          <!-- Checkout Confirmed State -->
           <div class="clean-card checkout-confirmed-card hidden" id="checkoutSuccessState">
             <div class="google-check-circle">✓</div>
             <h3 class="confirmed-title">Booking Confirmed!</h3>
+            <p class="confirmed-sub">Your court has been reserved and your digital gate PIN is active.</p>
             <div class="confirmed-receipt-box" id="bookingReceiptTicket"></div>
-            <button type="button" class="checkout-action-pill" id="returnTo3DSportsTrigger" style="display:inline-flex;">
-              <span>Return to 3D Sports Hub</span>
-            </button>
+            <div class="confirmed-actions-row">
+              <button type="button" class="checkout-secondary-pill" id="copyPinActionBtn">
+                <span>📋 Copy Gate PIN</span>
+              </button>
+              <button type="button" class="checkout-action-pill" id="returnTo3DSportsTrigger">
+                <span>← Return to 3D Sports Hub</span>
+              </button>
+            </div>
           </div>
         </div>
       </section>
@@ -321,6 +573,6 @@
     integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
     crossorigin=""
   ></script>
-  <script src="app.js?v=11"></script>
+  <script src="app.js?v=15"></script>
 </body>
 </html>

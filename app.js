@@ -619,20 +619,38 @@ const TIME_SLOTS_OPTIONS = [
 ];
 
 /* ============================================================================
-   3. APPLICATION STATE
+   3. APPLICATION STATE & CALENDAR CONSTANTS
    ============================================================================ */
+const MONTH_NAMES = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'
+];
+
+const DAY_NAMES = [
+  'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'
+];
+
+const currentInitDate = new Date();
 const appState = {
   currentView: 'hub', // 'hub' | 'courtScene' | 'expandedCourt' | 'checkout'
   isTransitioning: false,
   selectedSportId: null,
   selectedCourtId: null,
+  galleryIndex: 0,
+  calendarYear: currentInitDate.getFullYear(),
+  calendarMonth: currentInitDate.getMonth(),
   booking: {
+    selectedDate: new Date(currentInitDate.getFullYear(), currentInitDate.getMonth(), currentInitDate.getDate()),
     dayOffset: 0,
     dayLabel: 'Today',
+    isWeekend: currentInitDate.getDay() === 0 || currentInitDate.getDay() === 6,
     bayName: '',
     timeSlot: '18:00',
     timeSlotLabel: '06:00 PM',
+    durationHours: 1,
+    playerCount: 4,
     equipmentAddon: false,
+    replayAddon: false,
     paymentMethod: 'Google Pay / Card'
   },
   leafletMap: null,
@@ -937,13 +955,48 @@ function createSportVortexParticles(accentColorHex) {
   };
 }
 
+function isMobile3DLayout() {
+  const aspect = window.innerWidth / Math.max(1, window.innerHeight);
+  return window.innerWidth <= 768 || aspect < 0.88;
+}
+
 function updateCameraDistance() {
   if (!scene3D.camera) return 11.8;
-  const aspect = window.innerWidth / window.innerHeight;
-  const desiredSpanX = 15.6;
+  const aspect = window.innerWidth / Math.max(1, window.innerHeight);
+  const mobileMode = isMobile3DLayout();
+  const desiredSpanX = mobileMode ? 7.6 : 15.6;
   const fovRad = (scene3D.camera.fov * Math.PI) / 180;
-  const requiredZ = desiredSpanX / (2 * Math.tan(fovRad / 2) * Math.max(0.6, aspect));
-  return Math.max(11.8, Math.min(22.0, requiredZ));
+  const requiredZ = desiredSpanX / (2 * Math.tan(fovRad / 2) * Math.max(0.52, aspect));
+  return mobileMode
+    ? Math.max(11.4, Math.min(15.2, requiredZ))
+    : Math.max(11.8, Math.min(22.0, requiredZ));
+}
+
+function updateHubStationsLayout() {
+  if (!scene3D.sportEntries || scene3D.sportEntries.length === 0) return;
+  const mobileMode = isMobile3DLayout();
+  const mobileCoords = [
+    [-1.85, 1.45],
+    [1.85, 1.45],
+    [-1.85, -1.55],
+    [1.85, -1.55]
+  ];
+
+  scene3D.sportEntries.forEach((entry, idx) => {
+    if (mobileMode) {
+      const [mx, my] = mobileCoords[idx] || [0, 0];
+      entry.rootGroup.position.set(mx, my, 0);
+    } else {
+      entry.rootGroup.position.set(entry.sport.stageX, 0.05, 0);
+    }
+    entry.restPos.copy(entry.rootGroup.position);
+  });
+
+  if (scene3D.floorMesh && scene3D.gridHelper) {
+    const floorY = mobileMode ? -3.25 : -1.65;
+    scene3D.floorMesh.position.y = floorY;
+    scene3D.gridHelper.position.y = floorY - 0.01;
+  }
 }
 
 function init3DExperience() {
@@ -1045,10 +1098,12 @@ function init3DExperience() {
   floorMesh.position.y = -1.65;
   floorMesh.receiveShadow = true;
   scene.add(floorMesh);
+  scene3D.floorMesh = floorMesh;
 
   const gridHelper = new THREE.GridHelper(54, 36, 0xcad6e8, 0xe1e8f2);
   gridHelper.position.y = -1.66;
   scene.add(gridHelper);
+  scene3D.gridHelper = gridHelper;
 
   scene3D.hubGroup = new THREE.Group();
   scene.add(scene3D.hubGroup);
@@ -1059,6 +1114,7 @@ function init3DExperience() {
   initAmbientParticleField();
   initBurstParticleSystem();
   buildSportHubModels();
+  updateHubStationsLayout();
 
   // Bind Pointer / Raycast & Resize Events
   window.addEventListener('resize', onWindowResize);
@@ -1706,9 +1762,10 @@ function buildSportHubModels() {
 
 function onWindowResize() {
   if (!scene3D.renderer || !scene3D.camera) return;
-  scene3D.camera.aspect = window.innerWidth / window.innerHeight;
+  scene3D.camera.aspect = window.innerWidth / Math.max(1, window.innerHeight);
   scene3D.camera.updateProjectionMatrix();
   scene3D.renderer.setSize(window.innerWidth, window.innerHeight);
+  updateHubStationsLayout();
 
   if (appState.currentView === 'hub' && !scene3D.activeClickAnim) {
     scene3D.cameraState.targetPos.z = updateCameraDistance();
@@ -1753,6 +1810,7 @@ function onCanvasPointerMove(event) {
   scene3D.pointerNDC.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
   scene3D.pointerWorld.set(scene3D.pointerNDC.x * 8.5, scene3D.pointerNDC.y * 4.5, 0);
 
+  if (event.pointerType === 'touch') return;
   if (appState.currentView !== 'hub' || appState.isTransitioning || scene3D.activeClickAnim) return;
 
   const entry = getIntersectedSportEntry(event.clientX, event.clientY);
@@ -1886,12 +1944,14 @@ function animate3DLoop() {
 
   updateParticleSystems(elapsed, deltaDt);
 
-  // 1. Update active impact shockwaves
+  // 1. Update active impact shockwaves & dispose expired GPU buffers
   for (let i = scene3D.shockwaveGroup.children.length - 1; i >= 0; i--) {
     const sw = scene3D.shockwaveGroup.children[i];
     const age = elapsed - sw.userData.birthTime;
     if (age > 0.55) {
       scene3D.shockwaveGroup.remove(sw);
+      if (sw.geometry) sw.geometry.dispose();
+      if (sw.material) sw.material.dispose();
     } else {
       const p = age / 0.55;
       const scale = 1 + Easing.easeOutCubic(p) * 5.2;
@@ -2058,10 +2118,19 @@ function resetHubModelsToRest() {
 }
 
 /* ============================================================================
-   9. SHARED UI HELPERS
+   9. SHARED UI HELPERS & PRICING / EXTRA COST CONSTANTS
    ============================================================================ */
 const ADDON_FEE_LKR = 800;
+const REPLAY_FEE_LKR = 650;
+const PEAK_SLOT_SURCHARGE_PER_HR = 600;
+const WEEKEND_SURCHARGE_PER_HR = 500;
+const EXTRA_PLAYER_FEE_LKR = 400;
 const SERVICE_FEE_LKR = 250;
+const DURATION_OPTIONS = [
+  { hours: 1, label: '1 hr' },
+  { hours: 1.5, label: '1.5 hrs' },
+  { hours: 2, label: '2 hrs' }
+];
 const VIEW_IDS = ['view3DSports', 'viewCourtScene', 'viewExpandedCourt', 'viewCheckout'];
 
 const byId = (id) => document.getElementById(id);
@@ -2085,6 +2154,47 @@ function getCourt(courtId) {
 
 function hexColor(num) {
   return `#${num.toString(16).padStart(6, '0')}`;
+}
+
+function getStandardPlayerCap(sportId) {
+  return sportId === 'futsal' ? 10 : 4;
+}
+
+function isPeakTimeSlot(slotId) {
+  return slotId === '18:00' || slotId === '20:00';
+}
+
+/**
+ * Build a 4-photo gallery for any court using verified high-resolution court photography.
+ */
+function getCourtGalleryItems(court) {
+  const sportCourts = COURTS_CATALOG.filter((c) => c.sportId === court.sportId);
+  const alt1 = sportCourts.find((c) => c.id !== court.id) || court;
+  const alt2 = sportCourts.find((c) => c.id !== court.id && c.id !== alt1.id) || court;
+  const alt3 = sportCourts[sportCourts.length - 1] || court;
+
+  return [
+    {
+      url: court.image,
+      caption: 'Main Court View',
+      shortLabel: 'Main View'
+    },
+    {
+      url: alt1.image,
+      caption: `${court.lighting} Night View`,
+      shortLabel: 'Lighting'
+    },
+    {
+      url: alt2.image,
+      caption: `${court.surface} Close-Up`,
+      shortLabel: 'Surface'
+    },
+    {
+      url: alt3.image,
+      caption: `${court.bays[1] || court.bays[0]} & Player Lounge`,
+      shortLabel: 'Lounge & Bay'
+    }
+  ];
 }
 
 /**
@@ -2112,7 +2222,7 @@ function setTransitionOverlay(visible) {
    ============================================================================ */
 
 /**
- * Enter the court-selection page for a sport (initial full-screen infinite grid).
+ * Enter the court-selection page for a sport (clean normal 2-column grid).
  */
 function enterCourtScenePage(sportId) {
   const sportObj = getSport(sportId);
@@ -2131,7 +2241,7 @@ function enterCourtScenePage(sportId) {
 
   setLayoutSelected(false);
   showActiveViewSection('viewCourtScene');
-  renderCourtGrid(sportObj, null);
+  renderCourtGrid(sportObj);
 
   setTimeout(() => {
     setTransitionOverlay(false);
@@ -2149,7 +2259,6 @@ function returnTo3DSportsHub() {
     appState.selectedSportId = null;
     appState.selectedCourtId = null;
     setLayoutSelected(false);
-    stopGridMomentum();
 
     if (scene3D.ready) {
       scene3D.hubGroup.visible = true;
@@ -2168,274 +2277,128 @@ function returnTo3DSportsHub() {
 }
 
 /* ============================================================================
-   11. INFINITE 2D COURT GRID (square tiles, horizontal + vertical wrap, drag-to-pan)
+   11. NORMAL 2-COLUMN COURT SELECTION GRID
    ============================================================================ */
 const courtGrid = {
   el: null,
-  totalCols: 0,
-  blockW: 0,
-  blockH: 0,
-  wrapX: false,
-  sportId: null,
-  excludedCourtId: null,
-  suppressClick: false,
-  pan: {
-    active: false,
-    moved: false,
-    startX: 0,
-    startY: 0,
-    prevX: 0,
-    prevY: 0,
-    velX: 0,
-    velY: 0,
-    raf: null
-  }
+  totalCols: 2,
+  sportId: null
 };
 
-/**
- * Expand a sport's courts into 2 tiles per venue (main + secondary bay) so each
- * repeating block of the infinite grid feels varied. Every tile maps to a real court.
- */
-function buildGridTileItems(courts) {
-  const mainTiles = courts.map((c) => ({
-    court: c,
-    title: c.name,
-    price: c.pricePerHour
-  }));
-  const bayTiles = courts.map((c, i) => ({
-    court: c,
-    title: `${c.name} — ${c.bays[1] || c.bays[0]}`,
-    price: c.pricePerHour + (i % 2 === 0 ? 400 : -200)
-  }));
-  return [...mainTiles, ...bayTiles];
-}
-
-function createCourtTile(item) {
-  const { court, title, price } = item;
+function createCourtTile(court) {
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = 'court-image-card';
   btn.dataset.courtId = court.id;
   btn.style.setProperty('--tile-accent', hexColor(court.surfaceColor));
-  btn.setAttribute('aria-label', `${title}, ${court.surface}, ${formatLKR(price)} per hour`);
+  btn.setAttribute(
+    'aria-label',
+    `${court.name}, ${court.surface}, ${formatLKR(court.pricePerHour)} per hour`
+  );
   btn.innerHTML = `
-    <img src="${court.image}" alt="" class="court-card-photo" draggable="false" />
+    <img src="${court.image}" alt="" class="court-card-photo" loading="lazy" decoding="async" draggable="false" />
+    <span class="court-card-peek-badge" data-peek-toggle="true" title="Toggle unobstructed photo preview">👁️ Photo</span>
     <span class="court-card-overlay" aria-hidden="true">
       <span class="overlay-top-row">
         <span class="overlay-surface-pill">${court.surface}</span>
-        <span class="overlay-rating-pill">★ ${court.rating.toFixed(1)}</span>
+        <span class="overlay-rating-pill">★ ${court.rating.toFixed(1)} (${court.reviews})</span>
       </span>
       <span class="overlay-bottom-info">
         <span class="overlay-title-group">
-          <strong class="overlay-court-name">${title}</strong>
-          <span class="overlay-court-sub">📍 ${court.area} · ${court.environment}</span>
+          <strong class="overlay-court-name">${court.name}</strong>
+          <span class="overlay-court-sub">📍 ${court.area} · ${court.environment} · ${court.dimensions}</span>
         </span>
-        <span class="overlay-price-badge">${formatLKR(price)} / hr</span>
+        <span class="overlay-price-badge">${formatLKR(court.pricePerHour)} / hr</span>
       </span>
     </span>
   `;
   return btn;
 }
 
-function readTileSizePx(gridEl) {
-  if (typeof window === 'undefined' || !window.getComputedStyle) return 296;
-  const cs = window.getComputedStyle(gridEl);
-  const raw = cs ? cs.getPropertyValue('--tile-size') : '';
-  const tile = parseFloat(raw) || 280;
-  const gapRaw = cs ? cs.getPropertyValue('--tile-gap') : '';
-  const gap = parseFloat(gapRaw) || 18;
-  return tile + gap;
+function renderGridSportSwitcher(activeSportObj) {
+  const switcherEl = byId('gridSportSwitcher');
+  if (switcherEl) {
+    switcherEl.replaceChildren(
+      ...SPORTS_CATALOG.map((sport) => {
+        const pill = document.createElement('button');
+        pill.type = 'button';
+        const isActive = sport.id === activeSportObj.id;
+        pill.className = `grid-sport-pill${isActive ? ' active' : ''}`;
+        pill.setAttribute('aria-selected', String(isActive));
+        pill.style.setProperty('--sport-accent', sport.accentHex);
+        pill.innerHTML = `<span class="sport-dot" aria-hidden="true"></span><span>${sport.shortName}</span>`;
+        pill.addEventListener('click', () => {
+          if (sport.id !== appState.selectedSportId) {
+            appState.selectedSportId = sport.id;
+            renderCourtGrid(sport);
+          }
+        });
+        return pill;
+      })
+    );
+  }
 }
 
 /**
- * Render the infinite grid.
- * - Initial state: a 2D wall of square tiles that wraps both horizontally and vertically.
- * - Selected state: the remaining courts in a 2-wide square grid that wraps vertically.
+ * Render the normal 2-column grid of courts for the active sport.
  */
-function renderCourtGrid(sportObj, excludedCourtId) {
-  const gridEl = courtGrid.el;
-  if (!gridEl) return;
-
+function renderCourtGrid(sportObj) {
+  const gridEl = courtGrid.el || byId('courtsGrid');
+  if (!gridEl || !sportObj) return;
+  courtGrid.el = gridEl;
   courtGrid.sportId = sportObj.id;
-  courtGrid.excludedCourtId = excludedCourtId;
-  stopGridMomentum();
+  courtGrid.totalCols = window.innerWidth <= 640 ? 1 : 2;
 
-  const courts = COURTS_CATALOG.filter(
-    (c) => c.sportId === sportObj.id && c.id !== excludedCourtId
-  );
-  const items = buildGridTileItems(courts);
-  const isSelectedMode = Boolean(excludedCourtId);
+  renderGridSportSwitcher(sportObj);
 
-  const cell = readTileSizePx(gridEl);
-  const baseCols = isSelectedMode ? 2 : 4;
-  const baseRows = isSelectedMode ? Math.ceil(items.length / baseCols) : 3;
-  const blockWEstimate = baseCols * cell;
-  const blockHEstimate = baseRows * cell;
-
-  // Enough repeated blocks that the wrap thresholds (0.5–1.5 blocks) are always reachable.
-  const repeatX = isSelectedMode ? 1 : Math.ceil(gridEl.clientWidth / blockWEstimate) + 3;
-  const repeatY = Math.max(4, Math.ceil(gridEl.clientHeight / blockHEstimate) + 3);
-
-  const totalCols = baseCols * repeatX;
-  const totalRows = baseRows * repeatY;
-  courtGrid.totalCols = totalCols;
-  courtGrid.wrapX = !isSelectedMode;
-  gridEl.style.setProperty('--grid-cols', String(totalCols));
-  gridEl.classList.toggle('is-compact', isSelectedMode);
+  const courts = COURTS_CATALOG.filter((c) => c.sportId === sportObj.id);
+  setText('gridVenueCountBadge', `${courts.length} Verified ${sportObj.shortName} Venues`);
 
   const fragment = document.createDocumentFragment();
-  for (let row = 0; row < totalRows; row++) {
-    const baseRow = row % baseRows;
-    for (let col = 0; col < totalCols; col++) {
-      const baseCol = col % baseCols;
-      // Shift each row so neighbouring tiles differ while the block stays periodic.
-      const index = (baseRow * baseCols + baseCol + baseRow) % items.length;
-      fragment.appendChild(createCourtTile(items[index]));
-    }
-  }
-  gridEl.replaceChildren(fragment);
-
-  // Measure the exact block size from real tile offsets, then start in the second block.
-  requestAnimationFrame(() => {
-    const tiles = gridEl.children;
-    const first = tiles[0];
-    if (!first) return;
-    const nextBlockCol = tiles[baseCols];
-    const nextBlockRow = tiles[baseRows * totalCols];
-    courtGrid.blockW = courtGrid.wrapX && nextBlockCol ? nextBlockCol.offsetLeft - first.offsetLeft : 0;
-    courtGrid.blockH = nextBlockRow ? nextBlockRow.offsetTop - first.offsetTop : 0;
-    gridEl.scrollLeft = courtGrid.blockW;
-    gridEl.scrollTop = courtGrid.blockH;
+  courts.forEach((court) => {
+    fragment.appendChild(createCourtTile(court));
   });
+  gridEl.replaceChildren(fragment);
+  gridEl.scrollTop = 0;
 }
 
-function onCourtGridScroll() {
-  const gridEl = courtGrid.el;
-  const { blockW, blockH } = courtGrid;
-
-  if (blockH > 0) {
-    if (gridEl.scrollTop < blockH * 0.5) gridEl.scrollTop += blockH;
-    else if (gridEl.scrollTop > blockH * 1.5) gridEl.scrollTop -= blockH;
-  }
-  if (courtGrid.wrapX && blockW > 0) {
-    if (gridEl.scrollLeft < blockW * 0.5) gridEl.scrollLeft += blockW;
-    else if (gridEl.scrollLeft > blockW * 1.5) gridEl.scrollLeft -= blockW;
-  }
-}
-
-function stopGridMomentum() {
-  const pan = courtGrid.pan;
-  if (pan.raf) {
-    cancelAnimationFrame(pan.raf);
-    pan.raf = null;
-  }
-}
-
-function runGridMomentum() {
-  const pan = courtGrid.pan;
-  if (pan.active || (Math.abs(pan.velX) < 0.3 && Math.abs(pan.velY) < 0.3)) {
-    pan.raf = null;
-    return;
-  }
-  courtGrid.el.scrollLeft -= pan.velX;
-  courtGrid.el.scrollTop -= pan.velY;
-  pan.velX *= 0.93;
-  pan.velY *= 0.93;
-  pan.raf = requestAnimationFrame(runGridMomentum);
-}
-
-/**
- * Mouse press-and-move panning with inertia. Touch and trackpads use native scrolling.
- */
 function initCourtGridInteractions() {
   const gridEl = byId('courtsGrid');
   if (!gridEl) return;
   courtGrid.el = gridEl;
-  const pan = courtGrid.pan;
-
-  gridEl.addEventListener('scroll', onCourtGridScroll, { passive: true });
-  gridEl.addEventListener('wheel', stopGridMomentum, { passive: true });
-  gridEl.addEventListener('dragstart', (e) => e.preventDefault());
 
   // Hide broken images gracefully (tile falls back to its accent gradient).
   gridEl.addEventListener(
     'error',
     (e) => {
-      if (e.target.tagName === 'IMG') e.target.classList.add('is-broken');
+      if (e.target && e.target.tagName === 'IMG') e.target.classList.add('is-broken');
     },
     true
   );
 
-  gridEl.addEventListener('pointerdown', (e) => {
-    if (e.pointerType !== 'mouse' || e.button !== 0) return;
-    stopGridMomentum();
-    courtGrid.suppressClick = false;
-    Object.assign(pan, {
-      active: true,
-      moved: false,
-      startX: e.clientX,
-      startY: e.clientY,
-      prevX: e.clientX,
-      prevY: e.clientY,
-      velX: 0,
-      velY: 0
-    });
-  });
-
-  window.addEventListener('pointermove', (e) => {
-    if (!pan.active) return;
-    const stepX = e.clientX - pan.prevX;
-    const stepY = e.clientY - pan.prevY;
-    pan.prevX = e.clientX;
-    pan.prevY = e.clientY;
-
-    if (!pan.moved && Math.hypot(e.clientX - pan.startX, e.clientY - pan.startY) > 5) {
-      pan.moved = true;
-      gridEl.classList.add('is-dragging');
-    }
-    if (pan.moved) {
-      gridEl.scrollLeft -= stepX;
-      gridEl.scrollTop -= stepY;
-      pan.velX = pan.velX * 0.2 + stepX * 0.8;
-      pan.velY = pan.velY * 0.2 + stepY * 0.8;
-    }
-  });
-
-  const endPan = () => {
-    if (!pan.active) return;
-    pan.active = false;
-    gridEl.classList.remove('is-dragging');
-    if (pan.moved) {
-      courtGrid.suppressClick = true;
-      setTimeout(() => {
-        courtGrid.suppressClick = false;
-      }, 80);
-      pan.raf = requestAnimationFrame(runGridMomentum);
-    }
-  };
-  window.addEventListener('pointerup', endPan);
-  window.addEventListener('pointercancel', endPan);
-
-  // Delegated tile click.
+  // Delegated tile click (with touch photo-peek support).
   gridEl.addEventListener('click', (e) => {
+    const peekToggle = e.target.closest('[data-peek-toggle]');
     const tile = e.target.closest('.court-image-card');
     if (!tile) return;
-    if (courtGrid.suppressClick) {
-      courtGrid.suppressClick = false;
+    if (peekToggle) {
+      e.stopPropagation();
+      tile.classList.toggle('is-peeked');
       return;
     }
     handleCourtCardSelect(tile.dataset.courtId, tile);
   });
 
-  // Delegated arrow-key navigation across the 2D grid.
+  // Delegated arrow-key navigation across the normal 2-column grid.
   gridEl.addEventListener('keydown', (e) => {
     const tile = e.target.closest('.court-image-card');
     if (!tile) return;
+    const cols = window.innerWidth <= 640 ? 1 : 2;
     const offsets = {
       ArrowRight: 1,
       ArrowLeft: -1,
-      ArrowDown: courtGrid.totalCols,
-      ArrowUp: -courtGrid.totalCols
+      ArrowDown: cols,
+      ArrowUp: -cols
     };
     const offset = offsets[e.key];
     if (offset === undefined) return;
@@ -2450,7 +2413,10 @@ function initCourtGridInteractions() {
 }
 
 /* ============================================================================
-   12. COURT SELECTION & TOP-RIGHT INSPECTOR
+   12. SELECTED COURT 3-COLUMN STUDIO
+       Col 1: Picture + Picture Gallery + 3D View with Dimensions
+       Col 2: Court Info, Specs, Rules & Venue Location Map
+       Col 3: Pricing Details, Booking Details, Extra Costs & Triggers
    ============================================================================ */
 const isoDiagram = {
   rotX: 52,
@@ -2480,7 +2446,9 @@ function initIsoDiagramDrag() {
     isoDiagram.dragging = true;
     isoDiagram.prevX = e.clientX;
     isoDiagram.prevY = e.clientY;
-    viewport.setPointerCapture(e.pointerId);
+    if (viewport.setPointerCapture && e.pointerId !== undefined) {
+      viewport.setPointerCapture(e.pointerId);
+    }
   });
 
   viewport.addEventListener('pointermove', (e) => {
@@ -2504,15 +2472,16 @@ function setLayoutSelected(isSelected) {
   if (!layoutEl) return;
   layoutEl.classList.toggle('is-initial', !isSelected);
   layoutEl.classList.toggle('has-selection', isSelected);
+  layoutEl.classList.toggle('is-selected', isSelected);
   const inspector = byId('courtRightInspector');
   if (inspector) inspector.inert = !isSelected;
 }
 
 /**
- * Fly a snapshot of the clicked tile into the top-right inspector card.
+ * Fly a snapshot of the clicked court card into the hero photo card.
  */
 function animateCardToTopRightCorner(sourceEl, imageUrl) {
-  const targetEl = byId('topRight3DViewport');
+  const targetEl = byId('selectedPhotoCard') || byId('topRight3DViewport');
   if (!sourceEl || !targetEl) return;
   if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
 
@@ -2548,15 +2517,40 @@ function handleCourtCardSelect(courtId, tileEl) {
   if (!court) return;
   const sportObj = getSport(court.sportId);
 
-  // Capture the tile position before the layout changes.
   const sourceRect = tileEl ? tileEl.getBoundingClientRect() : null;
   const ghost = sourceRect ? { getBoundingClientRect: () => sourceRect } : null;
 
   appState.selectedCourtId = court.id;
-  populateRightCourtInspector(court, sportObj);
+  appState.galleryIndex = 0;
+
+  const now = new Date();
+  const todayDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const isWknd = todayDate.getDay() === 0 || todayDate.getDay() === 6;
+
+  appState.calendarYear = todayDate.getFullYear();
+  appState.calendarMonth = todayDate.getMonth();
+
+  // Initialize default booking state for this court
+  const defaultSlot = TIME_SLOTS_OPTIONS[4]; // 06:00 PM
+  const stdPlayers = getStandardPlayerCap(court.sportId);
+  Object.assign(appState.booking, {
+    selectedDate: todayDate,
+    dayOffset: 0,
+    dayLabel: 'Today',
+    isWeekend: isWknd,
+    bayName: court.bays[0],
+    timeSlot: defaultSlot.id,
+    timeSlotLabel: defaultSlot.label,
+    durationHours: 1,
+    playerCount: stdPlayers,
+    equipmentAddon: false,
+    replayAddon: false
+  });
+
   setLayoutSelected(true);
-  renderCourtGrid(sportObj, court.id);
+  populateRightCourtInspector(court, sportObj);
   animateCardToTopRightCorner(ghost, court.image);
+  requestAnimationFrame(() => renderCourtLeafletMap(court));
 
   const title = byId('selectedCourtTitle');
   if (title) title.focus({ preventScroll: true });
@@ -2566,23 +2560,93 @@ function resetToInitialCourtGrid() {
   if (!appState.selectedSportId) return;
   appState.selectedCourtId = null;
   setLayoutSelected(false);
-  renderCourtGrid(getSport(appState.selectedSportId), null);
+  renderCourtGrid(getSport(appState.selectedSportId));
 }
 
-function populateRightCourtInspector(court, sportObj) {
+function setActiveGalleryPhoto(court, index) {
+  const items = getCourtGalleryItems(court);
+  const safeIdx = ((index % items.length) + items.length) % items.length;
+  appState.galleryIndex = safeIdx;
+  const activeItem = items[safeIdx];
+
   const photo = byId('trSelectedCourtPhoto');
   if (photo) {
     photo.classList.remove('is-broken');
     photo.onerror = () => photo.classList.add('is-broken');
-    photo.src = court.image;
+    photo.src = activeItem.url;
   }
+
+  setText('selectedPhotoCaption', `${safeIdx + 1} / ${items.length} · ${activeItem.caption}`);
+
+  const strip = byId('courtGalleryStrip');
+  if (strip) {
+    Array.from(strip.children).forEach((btn, idx) => {
+      const isAct = idx === safeIdx;
+      btn.classList.toggle('active', isAct);
+      btn.setAttribute('aria-pressed', String(isAct));
+    });
+  }
+}
+
+function renderCourtPhotoGallery(court) {
+  const strip = byId('courtGalleryStrip');
+  if (!strip) return;
+  const items = getCourtGalleryItems(court);
+
+  strip.replaceChildren(
+    ...items.map((item, idx) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = `gallery-thumb-btn${idx === appState.galleryIndex ? ' active' : ''}`;
+      btn.setAttribute('aria-label', `View photo ${idx + 1}: ${item.caption}`);
+      btn.setAttribute('aria-pressed', String(idx === appState.galleryIndex));
+      btn.innerHTML = `
+        <img src="${item.url}" alt="" draggable="false" />
+        <span class="gallery-thumb-caption">${item.shortLabel}</span>
+      `;
+      btn.addEventListener('click', () => setActiveGalleryPhoto(court, idx));
+      return btn;
+    })
+  );
+
+  setActiveGalleryPhoto(court, appState.galleryIndex);
+}
+
+function renderCourtSwitcherBar(court, sportObj) {
+  const switcher = byId('selectedCourtSwitcher');
+  if (!switcher) return;
+  const courts = COURTS_CATALOG.filter((c) => c.sportId === sportObj.id);
+  switcher.replaceChildren(
+    ...courts.map((c) => {
+      const pill = document.createElement('button');
+      pill.type = 'button';
+      const active = c.id === court.id;
+      pill.className = `court-switch-pill${active ? ' active' : ''}`;
+      pill.setAttribute('aria-selected', String(active));
+      pill.textContent = c.name;
+      pill.addEventListener('click', () => {
+        if (c.id !== appState.selectedCourtId) {
+          handleCourtCardSelect(c.id, null);
+        }
+      });
+      return pill;
+    })
+  );
+}
+
+function populateRightCourtInspector(court, sportObj) {
+  // Top switcher bar
+  renderCourtSwitcherBar(court, sportObj);
+  setText('tr3DSportBadge', `${sportObj.shortName} · ${court.surface}`);
+
+  // Column 1: Hero Photo + Gallery + 3D Dimensions
+  renderCourtPhotoGallery(court);
 
   const plane = byId('isoCourtPlane');
   if (plane) plane.style.setProperty('--iso-surface', hexColor(court.surfaceColor));
   resetIsoRotation();
 
   const dims = court.dimensionsSpec;
-  setText('tr3DSportBadge', `${sportObj.shortName} · ${court.surface}`);
   setText('dimLengthVal', dims.length);
   setText('dimWidthVal', dims.width);
   setText('dimHeightVal', dims.height);
@@ -2592,23 +2656,59 @@ function populateRightCourtInspector(court, sportObj) {
   setText('isoDimWidthTag', `W ${dims.width}`);
   setText('isoDimNetTag', `${dims.netLabel} ${dims.netHeight}`);
 
+  // Column 2: Court Info, Specs, Rules & Location
   setText('selectedCourtTitle', court.name);
-  setText(
-    'selectedCourtLocation',
-    `📍 ${court.address} (${court.distance}) · ★ ${court.rating.toFixed(1)} (${court.reviews} reviews)`
-  );
-  setText('selectedCourtPrice', formatLKR(court.pricePerHour));
+  setText('expandedCourtTitle', court.name);
+  setText('expandedCourtRating', `★ ${court.rating.toFixed(1)} (${court.reviews} reviews)`);
+  setText('expandedCourtEnv', court.environment);
+  setText('selectedCourtDistanceBadge', `📍 ${court.area} · ${court.distance}`);
+  setText('selectedCourtLocation', `📍 ${court.address} (${court.distance})`);
+  setText('expandedCourtLocation', `${court.address} · ${court.distance}`);
+  setText('mapCardLabel', `${court.name} · ${court.area}`);
   setText('selectedCourtDescription', court.description);
-  setText('bookNowBtnPrice', `${formatLKR(court.pricePerHour)} / hr →`);
+
+  const dirLink = byId('expandedDirectionsLink');
+  if (dirLink) {
+    dirLink.href = `https://www.google.com/maps/search/?api=1&query=${court.coords[0]},${court.coords[1]}`;
+  }
 
   const specsGrid = byId('selectedCourtSpecsGrid');
   if (specsGrid) {
-    specsGrid.innerHTML = [
-      ['Surface Type', court.surface],
-      ['Environment', court.environment],
-      ['Lighting', court.lighting]
-    ]
-      .map(([label, value]) => `<div class="spec-mini-card"><span>${label}</span><strong>${value}</strong></div>`)
+    const specsData = [
+      {
+        label: 'Surface Type',
+        value: court.surface,
+        icon: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"></path><path d="M2 17l10 5 10-5"></path><path d="M2 12l10 5 10-5"></path></svg>'
+      },
+      {
+        label: 'Lighting Spec',
+        value: court.lighting,
+        icon: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="2" x2="12" y2="4"></line><line x1="12" y1="20" x2="12" y2="22"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="2" y1="12" x2="4" y2="12"></line><line x1="20" y1="12" x2="22" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>'
+      },
+      {
+        label: 'Dimensions',
+        value: court.dimensions,
+        icon: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.3 8.7l-6-6a2 2 0 0 0-2.8 0L3 12.2a2 2 0 0 0 0 2.8l6 6a2 2 0 0 0 2.8 0L21.3 11.5a2 2 0 0 0 0-2.8z"></path><line x1="7.5" y1="10.5" x2="9.5" y2="8.5"></line><line x1="10.5" y1="13.5" x2="12.5" y2="11.5"></line><line x1="13.5" y1="16.5" x2="15.5" y2="14.5"></line></svg>'
+      },
+      {
+        label: 'Available Bays',
+        value: `${court.bays.length} Dedicated Bays`,
+        icon: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>'
+      }
+    ];
+
+    specsGrid.innerHTML = specsData
+      .map(
+        (s) => `
+        <div class="spec-mini-card">
+          <div class="spec-icon-box" aria-hidden="true">${s.icon}</div>
+          <div class="spec-text-box">
+            <span class="spec-label">${s.label}</span>
+            <strong class="spec-val">${s.value}</strong>
+          </div>
+        </div>
+      `
+      )
       .join('');
   }
 
@@ -2619,15 +2719,32 @@ function populateRightCourtInspector(court, sportObj) {
 
   const termsEl = byId('selectedCourtBookingTerms');
   if (termsEl) {
-    termsEl.innerHTML = court.bookingTerms.map((t) => `<li>${t}</li>`).join('');
+    termsEl.innerHTML = court.bookingTerms
+      .map(
+        (t) => `
+        <li class="policy-item">
+          <span class="policy-check-icon" aria-hidden="true">✓</span>
+          <span class="policy-text">${t}</span>
+        </li>
+      `
+      )
+      .join('');
   }
+
+  // Column 3: Pricing Details, Booking Details, Extra Costs & Triggers
+  setText('selectedCourtPrice', formatLKR(court.pricePerHour));
+  setText('expandedCourtPrice', `${formatLKR(court.pricePerHour)} / hr`);
+  setText('addonEquipmentTitle', `Pro Gear Pack (${sportObj.equipmentAddon})`);
+
+  renderExpandedSessionOptions(court);
+  updateExpandedPriceSummary(court);
 
   const panel = byId('courtExpandedInfoPanel');
   if (panel) panel.scrollTop = 0;
 }
 
 /* ============================================================================
-   13. SESSION & MAP BOOKING PAGE (opened by "Book Now")
+   13. PRICING DETAILS, BOOKING DETAILS & EXTRA COST TRIGGERS
    ============================================================================ */
 function getSelectedCourt() {
   return getCourt(appState.selectedCourtId);
@@ -2639,63 +2756,156 @@ function openExpandedCourtView() {
   const sportObj = getSport(court.sportId);
 
   appState.currentView = 'expandedCourt';
-  const defaultSlot = TIME_SLOTS_OPTIONS[4];
-  Object.assign(appState.booking, {
-    dayOffset: 0,
-    dayLabel: 'Today',
-    bayName: court.bays[0],
-    timeSlot: defaultSlot.id,
-    timeSlotLabel: defaultSlot.label,
-    equipmentAddon: false
-  });
-
   setText('expandedCourtTitle', court.name);
   setText('expandedCourtRating', `★ ${court.rating.toFixed(1)}`);
   setText('expandedCourtEnv', court.environment);
   setText('expandedCourtLocation', `${court.address} · ${court.distance}`);
   setText('expandedCourtPrice', `${formatLKR(court.pricePerHour)} / hr`);
   setText('mapCardLabel', `${court.name} (${court.area})`);
-  setText('addonEquipmentTitle', sportObj.equipmentAddon);
-
-  const dirLink = byId('expandedDirectionsLink');
-  if (dirLink) {
-    dirLink.href = `https://www.google.com/maps/search/?api=1&query=${court.coords[0]},${court.coords[1]}`;
-  }
+  setText('addonEquipmentTitle', `Pro Gear Pack (${sportObj.equipmentAddon})`);
 
   renderExpandedSessionOptions(court);
   updateExpandedPriceSummary(court);
   showActiveViewSection('viewExpandedCourt');
-  requestAnimationFrame(() => renderCourtLeafletMap(court));
 }
 
-function renderChipGroup(containerId, options, isActive, onSelect) {
-  const container = byId(containerId);
-  if (!container) return;
-  container.replaceChildren(
-    ...options.map((opt) => {
-      const chip = document.createElement('button');
-      chip.type = 'button';
-      const active = isActive(opt);
-      chip.className = `option-chip${active ? ' active' : ''}`;
-      chip.setAttribute('aria-pressed', String(active));
-      chip.textContent = opt.label;
-      chip.addEventListener('click', () => onSelect(opt));
-      return chip;
-    })
-  );
+function selectCalendarDate(dateObj, court) {
+  const now = new Date();
+  const todayMid = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const tomorrowMid = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+
+  const isWknd = dateObj.getDay() === 0 || dateObj.getDay() === 6;
+  appState.booking.selectedDate = new Date(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate());
+  appState.booking.isWeekend = isWknd;
+
+  if (dateObj.getTime() === todayMid.getTime()) {
+    appState.booking.dayLabel = 'Today';
+  } else if (dateObj.getTime() === tomorrowMid.getTime()) {
+    appState.booking.dayLabel = 'Tomorrow';
+  } else {
+    const dow = DAY_NAMES[dateObj.getDay()].slice(0, 3);
+    const mon = MONTH_NAMES[dateObj.getMonth()].slice(0, 3);
+    appState.booking.dayLabel = `${dow}, ${mon} ${dateObj.getDate()}`;
+  }
+
+  if (court) {
+    renderBookingCalendar(court);
+    updateExpandedPriceSummary(court);
+  }
 }
 
-function getBookingDayOptions() {
-  const inTwoDays = new Date();
-  inTwoDays.setDate(inTwoDays.getDate() + 2);
-  return [
-    { offset: 0, label: 'Today' },
-    { offset: 1, label: 'Tomorrow' },
-    {
-      offset: 2,
-      label: inTwoDays.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+function updateShortcutPillHighlights(todayMid, selectedDate) {
+  const tomorrowMid = new Date(todayMid.getFullYear(), todayMid.getMonth(), todayMid.getDate() + 1);
+  const isToday = selectedDate.getTime() === todayMid.getTime();
+  const isTomorrow = selectedDate.getTime() === tomorrowMid.getTime();
+
+  const daysUntilSat = (6 - todayMid.getDay() + 7) % 7;
+  const thisWeekendSat = new Date(todayMid.getFullYear(), todayMid.getMonth(), todayMid.getDate() + daysUntilSat);
+  const isThisWeekend = selectedDate.getTime() === thisWeekendSat.getTime();
+
+  const todayBtn = byId('calQuickToday');
+  const tomorrowBtn = byId('calQuickTomorrow');
+  const weekendBtn = byId('calQuickWeekend');
+
+  if (todayBtn) todayBtn.classList.toggle('active', isToday);
+  if (tomorrowBtn) tomorrowBtn.classList.toggle('active', isTomorrow);
+  if (weekendBtn) weekendBtn.classList.toggle('active', isThisWeekend);
+}
+
+function renderBookingCalendar(court) {
+  const grid = byId('calendarDaysGrid');
+  const monthTitle = byId('calMonthTitle');
+  const bannerText = byId('calSelectedBannerText');
+  const prevBtn = byId('calPrevMonthBtn');
+
+  const now = new Date();
+  const todayMid = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+  const viewYear = appState.calendarYear;
+  const viewMonth = appState.calendarMonth;
+
+  if (monthTitle) {
+    monthTitle.textContent = `${MONTH_NAMES[viewMonth]} ${viewYear}`;
+  }
+
+  const isCurrentOrPastMonth =
+    viewYear < now.getFullYear() || (viewYear === now.getFullYear() && viewMonth <= now.getMonth());
+  if (prevBtn) {
+    prevBtn.disabled = isCurrentOrPastMonth;
+    prevBtn.style.opacity = isCurrentOrPastMonth ? '0.35' : '1';
+    prevBtn.style.pointerEvents = isCurrentOrPastMonth ? 'none' : 'auto';
+  }
+
+  if (!grid) return;
+
+  // Monday = 0, Sunday = 6
+  const firstDay = new Date(viewYear, viewMonth, 1).getDay();
+  const startOffset = (firstDay + 6) % 7;
+  const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+
+  const selectedDate = appState.booking.selectedDate || todayMid;
+  const selY = selectedDate.getFullYear();
+  const selM = selectedDate.getMonth();
+  const selD = selectedDate.getDate();
+
+  const dayElements = [];
+
+  // Empty leading cells
+  for (let i = 0; i < startOffset; i++) {
+    const emptyCell = document.createElement('div');
+    emptyCell.className = 'cal-day-cell is-empty';
+    emptyCell.setAttribute('aria-hidden', 'true');
+    dayElements.push(emptyCell);
+  }
+
+  // Active month days
+  for (let day = 1; day <= daysInMonth; day++) {
+    const cellDate = new Date(viewYear, viewMonth, day);
+    const dow = cellDate.getDay();
+    const isWknd = dow === 0 || dow === 6;
+    const isToday = cellDate.getTime() === todayMid.getTime();
+    const isPast = cellDate.getTime() < todayMid.getTime();
+    const isSelected = viewYear === selY && viewMonth === selM && day === selD;
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    let classNames = 'cal-day-cell';
+    if (isToday) classNames += ' is-today';
+    if (isSelected) classNames += ' is-selected';
+    if (isWknd) classNames += ' is-weekend';
+    if (isPast) classNames += ' is-disabled';
+
+    btn.className = classNames;
+    btn.textContent = String(day);
+    btn.setAttribute(
+      'aria-label',
+      `${DAY_NAMES[dow]}, ${MONTH_NAMES[viewMonth]} ${day}, ${viewYear}${isWknd ? ' (Weekend)' : ''}`
+    );
+    btn.setAttribute('aria-selected', String(isSelected));
+
+    if (isPast) {
+      btn.disabled = true;
+    } else {
+      btn.addEventListener('click', () => {
+        selectCalendarDate(cellDate, court);
+      });
     }
-  ];
+
+    dayElements.push(btn);
+  }
+
+  grid.replaceChildren(...dayElements);
+
+  if (bannerText) {
+    const curDow = selectedDate.getDay();
+    const curWknd = curDow === 0 || curDow === 6;
+    const shortDay = DAY_NAMES[curDow];
+    const shortMonth = MONTH_NAMES[selectedDate.getMonth()].slice(0, 3);
+    const rateNote = curWknd ? 'Weekend Peak (+LKR 500/hr)' : 'Standard Off-Peak';
+    bannerText.textContent = `${shortDay}, ${shortMonth} ${selectedDate.getDate()}, ${selectedDate.getFullYear()} · ${rateNote}`;
+  }
+
+  updateShortcutPillHighlights(todayMid, selectedDate);
 }
 
 function renderExpandedSessionOptions(court) {
@@ -2705,49 +2915,218 @@ function renderExpandedSessionOptions(court) {
     updateExpandedPriceSummary(court);
   };
 
-  renderChipGroup(
-    'dayOptionsRow',
-    getBookingDayOptions(),
-    (d) => d.offset === booking.dayOffset,
-    (d) => {
-      booking.dayOffset = d.offset;
-      booking.dayLabel = d.label;
-      rerender();
-    }
-  );
+  // Render Interactive Calendar
+  renderBookingCalendar(court);
 
-  renderChipGroup(
-    'courtBayOptions',
-    court.bays.map((bay) => ({ label: bay })),
-    (b) => b.label === booking.bayName,
-    (b) => {
-      booking.bayName = b.label;
-      rerender();
-    }
-  );
+  // Render Court Bay Options with .bay-chip
+  const bayContainer = byId('courtBayOptions');
+  if (bayContainer) {
+    bayContainer.replaceChildren(
+      ...court.bays.map((bay) => {
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        const active = bay === booking.bayName;
+        chip.className = `bay-chip${active ? ' active' : ''}`;
+        chip.setAttribute('aria-pressed', String(active));
+        chip.textContent = bay;
+        chip.addEventListener('click', () => {
+          booking.bayName = bay;
+          rerender();
+        });
+        return chip;
+      })
+    );
+  }
 
-  renderChipGroup(
-    'timeSlotsGrid',
-    TIME_SLOTS_OPTIONS,
-    (s) => s.id === booking.timeSlot,
-    (s) => {
-      booking.timeSlot = s.id;
-      booking.timeSlotLabel = s.label;
-      rerender();
-    }
-  );
+  // Render Time Slot Grid with .time-slot-chip and peak highlight
+  const slotContainer = byId('timeSlotsGrid');
+  if (slotContainer) {
+    slotContainer.replaceChildren(
+      ...TIME_SLOTS_OPTIONS.map((slot) => {
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        const active = slot.id === booking.timeSlot;
+        const isPeak = isPeakTimeSlot(slot.id);
+        chip.className = `time-slot-chip${active ? ' active' : ''}${isPeak ? ' is-peak-slot' : ''}`;
+        chip.setAttribute('aria-pressed', String(active));
+        chip.innerHTML = `
+          <span class="time-slot-text">${slot.label}</span>
+          ${isPeak ? '<span class="time-slot-peak" title="Evening Floodlight Peak Rate">★ Peak</span>' : ''}
+        `;
+        chip.addEventListener('click', () => {
+          booking.timeSlot = slot.id;
+          booking.timeSlotLabel = slot.label;
+          rerender();
+        });
+        return chip;
+      })
+    );
+  }
+
+  // Render Duration Options with .duration-chip
+  const durContainer = byId('durationOptionsRow');
+  if (durContainer) {
+    durContainer.replaceChildren(
+      ...DURATION_OPTIONS.map((dur) => {
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        const active = dur.hours === booking.durationHours;
+        chip.className = `duration-chip${active ? ' active' : ''}`;
+        chip.setAttribute('aria-pressed', String(active));
+        chip.textContent = dur.label;
+        chip.addEventListener('click', () => {
+          booking.durationHours = dur.hours;
+          rerender();
+        });
+        return chip;
+      })
+    );
+  }
+
+  const stdCap = getStandardPlayerCap(court.sportId);
+  setText('playerCapLabel', `Players (Std cap: ${stdCap})`);
+  setText('playerCountValue', String(booking.playerCount || stdCap));
 
   const addonCard = byId('addonToggleCard');
   if (addonCard) addonCard.setAttribute('aria-checked', String(booking.equipmentAddon));
+
+  const replayCard = byId('replayToggleCard');
+  if (replayCard) replayCard.setAttribute('aria-checked', String(booking.replayAddon));
+}
+
+/**
+ * Compute detailed pricing & triggered extra costs for the current court + booking settings.
+ */
+function calculateDetailedBookingCosts(court) {
+  const booking = appState.booking;
+  const duration = booking.durationHours || 1;
+  const stdCap = getStandardPlayerCap(court.sportId);
+  const players = booking.playerCount || stdCap;
+  const extraPlayers = Math.max(0, players - stdCap);
+
+  const baseCost = Math.round(court.pricePerHour * duration);
+  const isPeak = isPeakTimeSlot(booking.timeSlot);
+  const peakCost = isPeak ? Math.round(PEAK_SLOT_SURCHARGE_PER_HR * duration) : 0;
+  const weekendCost = booking.isWeekend ? Math.round(WEEKEND_SURCHARGE_PER_HR * duration) : 0;
+  const extraPlayersCost = extraPlayers * EXTRA_PLAYER_FEE_LKR;
+  const gearCost = booking.equipmentAddon ? ADDON_FEE_LKR : 0;
+  const replayCost = booking.replayAddon ? REPLAY_FEE_LKR : 0;
+
+  const subtotal = baseCost + peakCost + weekendCost + extraPlayersCost + gearCost + replayCost;
+  const grandTotal = subtotal + SERVICE_FEE_LKR;
+
+  const triggers = [
+    {
+      id: 'peak-floodlight',
+      title: 'Evening Floodlight & Prime-Time Fee',
+      triggerDesc: 'Triggered automatically when selecting an evening slot (06:00 PM or 08:00 PM)',
+      rateLabel: `+ ${formatLKR(PEAK_SLOT_SURCHARGE_PER_HR)} / hr`,
+      triggered: isPeak,
+      amount: peakCost
+    },
+    {
+      id: 'weekend-demand',
+      title: 'Weekend Peak Demand Surcharge',
+      triggerDesc: 'Triggered automatically when booking on Saturday or Sunday',
+      rateLabel: `+ ${formatLKR(WEEKEND_SURCHARGE_PER_HR)} / hr`,
+      triggered: Boolean(booking.isWeekend),
+      amount: weekendCost
+    },
+    {
+      id: 'extra-players',
+      title: `Extra Player Overflow (> ${stdCap} players)`,
+      triggerDesc: `Triggered when group size exceeds ${stdCap} standard players (${extraPlayers} extra)`,
+      rateLabel: `+ ${formatLKR(EXTRA_PLAYER_FEE_LKR)} / player`,
+      triggered: extraPlayers > 0,
+      amount: extraPlayersCost
+    }
+  ];
+
+  return {
+    duration,
+    stdCap,
+    players,
+    extraPlayers,
+    baseCost,
+    isPeak,
+    peakCost,
+    weekendCost,
+    extraPlayersCost,
+    gearCost,
+    replayCost,
+    subtotal,
+    grandTotal,
+    triggers
+  };
 }
 
 function getBookingSubtotal(court) {
-  return court.pricePerHour + (appState.booking.equipmentAddon ? ADDON_FEE_LKR : 0);
+  return calculateDetailedBookingCosts(court).subtotal;
 }
 
 function updateExpandedPriceSummary(court) {
-  setText('summaryRateLabel', `${appState.booking.dayLabel} · ${appState.booking.timeSlotLabel}`);
-  setText('summaryTotalAmount', formatLKR(getBookingSubtotal(court)));
+  const calc = calculateDetailedBookingCosts(court);
+  const booking = appState.booking;
+
+  // Update tier badge
+  const tierBadge = byId('pricingTierBadge');
+  if (tierBadge) {
+    const isPeakMode = calc.isPeak || booking.isWeekend;
+    tierBadge.textContent = isPeakMode ? '★ Peak Rate Active' : 'Off-Peak Standard';
+    tierBadge.classList.toggle('is-peak', isPeakMode);
+  }
+
+  // Render Extra Costs & What Triggers Them list
+  const triggerListEl = byId('extraCostsTriggerList');
+  if (triggerListEl) {
+    triggerListEl.innerHTML = calc.triggers
+      .map(
+        (t) => `
+        <div class="extra-cost-item${t.triggered ? ' is-triggered' : ''}">
+          <div class="extra-cost-info">
+            <span class="extra-cost-title">${t.title}</span>
+            <span class="extra-cost-trigger">${t.triggerDesc}</span>
+          </div>
+          <div class="extra-cost-right">
+            <span class="extra-cost-amount">${t.triggered ? `+ ${formatLKR(t.amount)}` : t.rateLabel}</span>
+            <span class="extra-cost-status">${t.triggered ? 'Triggered' : 'Not Triggered'}</span>
+          </div>
+        </div>
+      `
+      )
+      .join('');
+  }
+
+  // Render Live Itemized Price Breakdown
+  const breakdownEl = byId('livePriceBreakdown');
+  if (breakdownEl) {
+    const rows = [
+      [`Base Court Rate (${calc.duration} hr)`, formatLKR(calc.baseCost)]
+    ];
+    if (calc.peakCost > 0) rows.push(['Evening Floodlight Surcharge', `+ ${formatLKR(calc.peakCost)}`]);
+    if (calc.weekendCost > 0) rows.push(['Weekend Demand Surcharge', `+ ${formatLKR(calc.weekendCost)}`]);
+    if (calc.extraPlayersCost > 0) {
+      rows.push([`Extra Players (${calc.extraPlayers} × LKR 400)`, `+ ${formatLKR(calc.extraPlayersCost)}`]);
+    }
+    if (calc.gearCost > 0) rows.push(['Pro Gear Rental Pack', `+ ${formatLKR(calc.gearCost)}`]);
+    if (calc.replayCost > 0) rows.push(['AI Match Video Replay', `+ ${formatLKR(calc.replayCost)}`]);
+    rows.push(['Platform & Instant Gate PIN Fee', `+ ${formatLKR(SERVICE_FEE_LKR)}`]);
+
+    breakdownEl.innerHTML = rows
+      .map(([label, val]) => `<div class="breakdown-line"><span>${label}</span><strong>${val}</strong></div>`)
+      .join('');
+  }
+
+  setText(
+    'summaryRateLabel',
+    `${booking.dayLabel} · ${booking.timeSlotLabel} · ${calc.duration} hr (${calc.players} players)`
+  );
+  setText('summaryTotalAmount', formatLKR(calc.grandTotal));
+  setText('bookNowBtnPrice', `${formatLKR(calc.grandTotal)} →`);
+
+  // Sync mobile sticky bottom booking bar
+  setText('mobileStickyTotalAmount', formatLKR(calc.grandTotal));
+  setText('mobileStickyRateLabel', `${booking.dayLabel} · ${booking.timeSlotLabel} · ${calc.duration} hr`);
 }
 
 function toggleEquipmentAddon() {
@@ -2756,6 +3135,24 @@ function toggleEquipmentAddon() {
   appState.booking.equipmentAddon = !appState.booking.equipmentAddon;
   const addonCard = byId('addonToggleCard');
   if (addonCard) addonCard.setAttribute('aria-checked', String(appState.booking.equipmentAddon));
+  updateExpandedPriceSummary(court);
+}
+
+function toggleReplayAddon() {
+  const court = getSelectedCourt();
+  if (!court) return;
+  appState.booking.replayAddon = !appState.booking.replayAddon;
+  const replayCard = byId('replayToggleCard');
+  if (replayCard) replayCard.setAttribute('aria-checked', String(appState.booking.replayAddon));
+  updateExpandedPriceSummary(court);
+}
+
+function adjustPlayerCount(delta) {
+  const court = getSelectedCourt();
+  if (!court) return;
+  const next = Math.max(2, Math.min(20, (appState.booking.playerCount || 4) + delta));
+  appState.booking.playerCount = next;
+  setText('playerCountValue', String(next));
   updateExpandedPriceSummary(court);
 }
 
@@ -2775,7 +3172,10 @@ function renderCourtLeafletMap(court) {
     appState.leafletMarker.setLatLng(court.coords);
   }
 
-  appState.leafletMarker.bindPopup(`<strong>${court.name}</strong><br>${court.address}`).openPopup();
+  if (appState.leafletMarker && appState.leafletMarker.bindPopup) {
+    const popup = appState.leafletMarker.bindPopup(`<strong>${court.name}</strong><br>${court.address}`);
+    if (popup && popup.openPopup) popup.openPopup();
+  }
 }
 
 /* ============================================================================
@@ -2794,24 +3194,102 @@ function openCheckoutView() {
   byId('checkoutSuccessState')?.classList.add('hidden');
 
   const booking = appState.booking;
-  const grandTotal = getBookingSubtotal(court) + SERVICE_FEE_LKR;
-  setText('checkoutPayBtnAmount', formatLKR(grandTotal));
+  const calc = calculateDetailedBookingCosts(court);
+  setText('checkoutPayBtnAmount', formatLKR(calc.grandTotal));
 
   const recapEl = byId('checkoutOrderRecap');
   if (recapEl) {
-    recapEl.innerHTML =
-      recapRowsHtml([
-        ['Venue', court.name],
-        ['Surface', court.surface],
-        ['Dimensions', court.dimensions],
-        ['Date', booking.dayLabel],
-        ['Time', booking.timeSlotLabel],
-        ['Bay', booking.bayName],
-        ['Rate', formatLKR(court.pricePerHour)],
-        ['Gear', booking.equipmentAddon ? formatLKR(ADDON_FEE_LKR) : '—'],
-        ['Service Fee', formatLKR(SERVICE_FEE_LKR)]
-      ]) +
-      `<div class="recap-row recap-total"><span>Total</span><strong>${formatLKR(grandTotal)}</strong></div>`;
+    const breakdownRows = [
+      { label: `Base Court Rate (${calc.duration} hr)`, val: formatLKR(calc.baseCost), isSurcharge: false }
+    ];
+    if (calc.peakCost > 0) {
+      breakdownRows.push({ label: 'Evening Floodlight Fee', val: `+ ${formatLKR(calc.peakCost)}`, isSurcharge: true });
+    }
+    if (calc.weekendCost > 0) {
+      breakdownRows.push({ label: 'Weekend Demand Surcharge', val: `+ ${formatLKR(calc.weekendCost)}`, isSurcharge: true });
+    }
+    if (calc.extraPlayersCost > 0) {
+      breakdownRows.push({
+        label: `Extra Players (${calc.extraPlayers} × LKR 400)`,
+        val: `+ ${formatLKR(calc.extraPlayersCost)}`,
+        isSurcharge: true
+      });
+    }
+    if (calc.gearCost > 0) {
+      breakdownRows.push({ label: 'Pro Gear Rental Pack', val: `+ ${formatLKR(calc.gearCost)}`, isSurcharge: false });
+    }
+    if (calc.replayCost > 0) {
+      breakdownRows.push({ label: 'AI Match Video Replay', val: `+ ${formatLKR(calc.replayCost)}`, isSurcharge: false });
+    }
+    breakdownRows.push({ label: 'Platform & Instant Gate PIN', val: `+ ${formatLKR(SERVICE_FEE_LKR)}`, isSurcharge: false });
+
+    recapEl.innerHTML = `
+      <div class="summary-venue-header">
+        <img src="${court.image}" class="summary-court-img" alt="${court.name}" />
+        <div class="summary-venue-info">
+          <span class="summary-venue-title">${court.name}</span>
+          <div class="summary-badges-row">
+            <span class="summary-badge-pill highlight">${court.surface}</span>
+            <span class="summary-badge-pill">📍 ${court.area} · ${court.distance}</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="summary-schedule-grid">
+        <div class="schedule-tile">
+          <span class="schedule-tile-label">Date</span>
+          <strong class="schedule-tile-val">${booking.dayLabel}</strong>
+        </div>
+        <div class="schedule-tile">
+          <span class="schedule-tile-label">Time &amp; Duration</span>
+          <strong class="schedule-tile-val">${booking.timeSlotLabel} (${calc.duration} hr)</strong>
+        </div>
+        <div class="schedule-tile">
+          <span class="schedule-tile-label">Court Bay</span>
+          <strong class="schedule-tile-val">${booking.bayName}</strong>
+        </div>
+        <div class="schedule-tile">
+          <span class="schedule-tile-label">Players</span>
+          <strong class="schedule-tile-val">${calc.players} Players (Std: ${calc.stdCap})</strong>
+        </div>
+      </div>
+
+      <div class="summary-breakdown-box">
+        ${breakdownRows
+          .map(
+            (r) => `
+          <div class="breakdown-row${r.isSurcharge ? ' has-surcharge' : ''}">
+            <span>${r.label}</span>
+            <strong>${r.val}</strong>
+          </div>
+        `
+          )
+          .join('')}
+      </div>
+
+      <div class="summary-total-container">
+        <div class="summary-total-top">
+          <span class="summary-total-label">Total Amount Due</span>
+          <strong class="summary-total-price">${formatLKR(calc.grandTotal)}</strong>
+        </div>
+        <span class="summary-total-tax-note">Includes all court preparation, floodlighting &amp; taxes</span>
+      </div>
+
+      <div class="summary-perks-list">
+        <div class="summary-perk-item">
+          <span>✓</span>
+          <span>Instant gate access PIN sent via SMS 15 mins before match</span>
+        </div>
+        <div class="summary-perk-item">
+          <span>✓</span>
+          <span>100% Weather Protection guarantee (rain credit)</span>
+        </div>
+        <div class="summary-perk-item">
+          <span>✓</span>
+          <span>Complimentary towel &amp; locker room access included</span>
+        </div>
+      </div>
+    `;
   }
 
   renderPaymentMethodOptions();
@@ -2823,9 +3301,24 @@ function renderPaymentMethodOptions() {
   if (!container) return;
 
   const methods = [
-    { title: 'Google Pay / Card', sub: 'Instant' },
-    { title: 'LankaQR', sub: 'QR' },
-    { title: 'Pay at Venue', sub: 'On arrival' }
+    {
+      title: 'Google Pay / Card',
+      sub: 'Visa, Mastercard, AMEX & Apple/Google Pay',
+      badge: 'Popular',
+      icon: '💳'
+    },
+    {
+      title: 'LankaQR Instant',
+      sub: 'Commercial, Sampath, FriMi, HNB, Seylan apps',
+      badge: 'Zero Fee',
+      icon: '📱'
+    },
+    {
+      title: 'Pay at Venue',
+      sub: 'Settle via cash or card POS upon front-desk arrival',
+      badge: 'Flexible',
+      icon: '🏢'
+    }
   ];
 
   container.replaceChildren(
@@ -2835,7 +3328,19 @@ function renderPaymentMethodOptions() {
       card.type = 'button';
       card.className = `pay-option-card${isSelected ? ' active' : ''}`;
       card.setAttribute('aria-pressed', String(isSelected));
-      card.innerHTML = `<strong>${m.title}</strong><span>${m.sub}</span>`;
+      card.innerHTML = `
+        <div class="pay-option-left">
+          <span class="pay-icon-box" aria-hidden="true">${m.icon}</span>
+          <div class="pay-option-text">
+            <div class="pay-option-title-row">
+              <strong>${m.title}</strong>
+              ${m.badge ? `<span class="pay-badge-popular">${m.badge}</span>` : ''}
+            </div>
+            <span class="pay-sub">${m.sub}</span>
+          </div>
+        </div>
+        <div class="pay-radio-circle" aria-hidden="true"></div>
+      `;
       card.addEventListener('click', () => {
         appState.booking.paymentMethod = m.title;
         renderPaymentMethodOptions();
@@ -2851,25 +3356,39 @@ function handleCheckoutSubmit(event) {
   if (!court) return;
 
   const booking = appState.booking;
-  const playerName = byId('playerName').value.trim();
-  const playerPhone = byId('playerPhone').value.trim();
-  const grandTotal = getBookingSubtotal(court) + SERVICE_FEE_LKR;
+  const calc = calculateDetailedBookingCosts(court);
+  const playerName = byId('playerName')?.value?.trim() || 'Valued Player';
+  const playerPhone = byId('playerPhone')?.value?.trim() || '077 123 4567';
   const bookingRef = `PLK-${Math.floor(100000 + Math.random() * 900000)}`;
+  const gatePin = Math.floor(100000 + Math.random() * 900000);
+  const gatePinFormatted = `${String(gatePin).slice(0, 3)} ${String(gatePin).slice(3)}`;
+  appState.lastGatePin = String(gatePin);
+
+  const copyPinBtn = byId('copyPinActionBtn');
+  if (copyPinBtn) copyPinBtn.textContent = '📋 Copy Gate PIN';
 
   byId('checkoutFormState')?.classList.add('hidden');
   byId('checkoutSuccessState')?.classList.remove('hidden');
 
   const receiptEl = byId('bookingReceiptTicket');
   if (receiptEl) {
-    receiptEl.innerHTML = recapRowsHtml([
-      ['Ref', bookingRef],
-      ['Venue', `${court.name} (${booking.bayName})`],
-      ['Session', `${booking.dayLabel} · ${booking.timeSlotLabel}`],
-      ['Payment', booking.paymentMethod],
-      ['Player', `${playerName} (${playerPhone})`],
-      ['Total', formatLKR(grandTotal)]
-    ]);
+    receiptEl.innerHTML = `
+      <div class="confirmed-pin-banner">
+        <span class="confirmed-pin-label">DIGITAL GATE ACCESS PIN</span>
+        <strong class="confirmed-pin-code">${gatePinFormatted}</strong>
+        <span class="confirmed-pin-sub">Enter this 6-digit PIN on the court gate digital keypad. Valid 15 mins prior to session.</span>
+      </div>
+      ${recapRowsHtml([
+        ['Booking Reference', bookingRef],
+        ['Venue', `${court.name} (${booking.bayName})`],
+        ['Scheduled Session', `${booking.dayLabel} · ${booking.timeSlotLabel} (${calc.duration} hr)`],
+        ['Payment Method', booking.paymentMethod],
+        ['Player', `${playerName} (${playerPhone})`],
+        ['Total Amount Paid', formatLKR(calc.grandTotal)]
+      ])}
+    `;
   }
+
   const checkoutForm = byId('checkoutForm');
   if (checkoutForm && typeof checkoutForm.reset === 'function') {
     checkoutForm.reset();
@@ -2902,8 +3421,8 @@ function renderHubFallback() {
 function handleGlobalBack() {
   switch (appState.currentView) {
     case 'checkout':
-      appState.currentView = 'expandedCourt';
-      showActiveViewSection('viewExpandedCourt');
+      appState.currentView = 'courtScene';
+      showActiveViewSection('viewCourtScene');
       break;
     case 'expandedCourt':
       appState.currentView = 'courtScene';
@@ -2923,6 +3442,18 @@ function bindClick(id, handler) {
   if (el) el.addEventListener('click', handler);
 }
 
+function bindToggleCardKeydown(id, handler) {
+  const el = byId(id);
+  if (el) {
+    el.addEventListener('keydown', (e) => {
+      if (e.key === ' ' || e.key === 'Enter') {
+        e.preventDefault();
+        handler();
+      }
+    });
+  }
+}
+
 function initPlayLKApp() {
   showActiveViewSection('view3DSports');
   setLayoutSelected(false);
@@ -2933,29 +3464,165 @@ function initPlayLKApp() {
   initCourtGridInteractions();
   initIsoDiagramDrag();
 
-  // Home dots: step back one level (selected court → full grid → 3D hub).
+  // Home dots: step back one level (selected court → normal grid → 3D hub).
   bindClick('brandResetTrigger', () => {
     if (appState.currentView === 'courtScene' && appState.selectedCourtId) resetToInitialCourtGrid();
     else returnTo3DSportsHub();
   });
 
   bindClick('closeInspectorBtn', resetToInitialCourtGrid);
-  bindClick('bookNowBtn', openExpandedCourtView);
-  bindClick('backToCourtsTrigger', handleGlobalBack);
-  bindClick('goToCheckoutTrigger', openCheckoutView);
-  bindClick('backToExpandedTrigger', handleGlobalBack);
-  bindClick('returnTo3DSportsTrigger', returnTo3DSportsHub);
-  bindClick('addonToggleCard', toggleEquipmentAddon);
+  bindClick('gridBackToHubBtn', returnTo3DSportsHub);
+  bindClick('resetIsoAngleBtn', resetIsoRotation);
+  bindClick('galleryPrevBtn', () => {
+    const court = getSelectedCourt();
+    if (court) setActiveGalleryPhoto(court, appState.galleryIndex - 1);
+  });
+  bindClick('galleryNextBtn', () => {
+    const court = getSelectedCourt();
+    if (court) setActiveGalleryPhoto(court, appState.galleryIndex + 1);
+  });
 
-  const addonCard = byId('addonToggleCard');
-  if (addonCard) {
-    addonCard.addEventListener('keydown', (e) => {
-      if (e.key === ' ' || e.key === 'Enter') {
-        e.preventDefault();
-        toggleEquipmentAddon();
+  // Touch swipe on Hero Photo Card to cycle gallery on mobile
+  const photoCard = byId('selectedPhotoCard');
+  if (photoCard) {
+    let touchStartX = 0;
+    photoCard.addEventListener(
+      'touchstart',
+      (e) => {
+        if (e.changedTouches && e.changedTouches[0]) {
+          touchStartX = e.changedTouches[0].clientX;
+        }
+      },
+      { passive: true }
+    );
+    photoCard.addEventListener(
+      'touchend',
+      (e) => {
+        if (!e.changedTouches || !e.changedTouches[0]) return;
+        const dx = e.changedTouches[0].clientX - touchStartX;
+        if (Math.abs(dx) > 40) {
+          const court = getSelectedCourt();
+          if (court) {
+            setActiveGalleryPhoto(court, appState.galleryIndex + (dx < 0 ? 1 : -1));
+          }
+        }
+      },
+      { passive: true }
+    );
+  }
+
+  // Mobile Studio Quick-Jump Section Tabs
+  const mobileTabs = byId('mobileStudioTabs');
+  if (mobileTabs) {
+    mobileTabs.addEventListener('click', (e) => {
+      const btn = e.target.closest('.mobile-tab-pill');
+      if (!btn) return;
+      const targetId = btn.dataset.target;
+      const targetEl = byId(targetId);
+      Array.from(mobileTabs.children).forEach((pill) => {
+        const isCurrent = pill === btn;
+        pill.classList.toggle('active', isCurrent);
+        pill.setAttribute('aria-selected', String(isCurrent));
+      });
+      if (targetEl && typeof targetEl.scrollIntoView === 'function') {
+        targetEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }
     });
   }
+
+  bindClick('mobileJumpToSlotsBtn', () => {
+    const pricingCol = byId('studioColPricing');
+    if (pricingCol && typeof pricingCol.scrollIntoView === 'function') {
+      pricingCol.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  });
+  bindClick('mobileBookNowBtn', openCheckoutView);
+
+  bindClick('copyPinActionBtn', () => {
+    const pin = appState.lastGatePin || '000000';
+    const btn = byId('copyPinActionBtn');
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+      navigator.clipboard.writeText(pin).catch(() => {});
+    }
+    if (btn) {
+      btn.textContent = `✓ PIN ${pin} Copied!`;
+      setTimeout(() => {
+        btn.textContent = '📋 Copy Gate PIN';
+      }, 2400);
+    }
+  });
+
+  bindClick('playerCountMinus', () => adjustPlayerCount(-1));
+  bindClick('playerCountPlus', () => adjustPlayerCount(1));
+
+  // Calendar month navigation
+  bindClick('calPrevMonthBtn', () => {
+    const court = getSelectedCourt();
+    if (appState.calendarMonth === 0) {
+      appState.calendarMonth = 11;
+      appState.calendarYear -= 1;
+    } else {
+      appState.calendarMonth -= 1;
+    }
+    if (court) renderBookingCalendar(court);
+  });
+
+  bindClick('calNextMonthBtn', () => {
+    const court = getSelectedCourt();
+    if (appState.calendarMonth === 11) {
+      appState.calendarMonth = 0;
+      appState.calendarYear += 1;
+    } else {
+      appState.calendarMonth += 1;
+    }
+    if (court) renderBookingCalendar(court);
+  });
+
+  // Calendar quick shortcut buttons
+  bindClick('calQuickToday', () => {
+    const court = getSelectedCourt();
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    appState.calendarYear = today.getFullYear();
+    appState.calendarMonth = today.getMonth();
+    selectCalendarDate(today, court);
+  });
+
+  bindClick('calQuickTomorrow', () => {
+    const court = getSelectedCourt();
+    const now = new Date();
+    const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+    appState.calendarYear = tomorrow.getFullYear();
+    appState.calendarMonth = tomorrow.getMonth();
+    selectCalendarDate(tomorrow, court);
+  });
+
+  bindClick('calQuickWeekend', () => {
+    const court = getSelectedCourt();
+    const now = new Date();
+    const daysUntilSat = (6 - now.getDay() + 7) % 7;
+    const weekendSat = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate() + (now.getDay() === 0 || now.getDay() === 6 ? 0 : (daysUntilSat === 0 ? 7 : daysUntilSat))
+    );
+    appState.calendarYear = weekendSat.getFullYear();
+    appState.calendarMonth = weekendSat.getMonth();
+    selectCalendarDate(weekendSat, court);
+  });
+
+  bindClick('addonToggleCard', toggleEquipmentAddon);
+  bindToggleCardKeydown('addonToggleCard', toggleEquipmentAddon);
+
+  bindClick('replayToggleCard', toggleReplayAddon);
+  bindToggleCardKeydown('replayToggleCard', toggleReplayAddon);
+
+  // Clicking "Book Now" in the 3-column studio proceeds directly to Checkout
+  bindClick('bookNowBtn', openCheckoutView);
+  bindClick('goToCheckoutTrigger', openCheckoutView);
+  bindClick('backToCourtsTrigger', handleGlobalBack);
+  bindClick('backToExpandedTrigger', handleGlobalBack);
+  bindClick('returnTo3DSportsTrigger', returnTo3DSportsHub);
 
   const checkoutForm = byId('checkoutForm');
   if (checkoutForm) checkoutForm.addEventListener('submit', handleCheckoutSubmit);
@@ -2964,15 +3631,10 @@ function initPlayLKApp() {
     if (e.key === 'Escape') handleGlobalBack();
   });
 
-  // Rebuild the grid on resize so block sizes and repeat counts stay correct.
-  let resizeTimer = null;
   window.addEventListener('resize', () => {
-    clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(() => {
-      if (appState.currentView === 'courtScene' && courtGrid.sportId) {
-        renderCourtGrid(getSport(courtGrid.sportId), courtGrid.excludedCourtId);
-      }
-    }, 160);
+    if (appState.currentView === 'courtScene' && appState.selectedCourtId && appState.leafletMap) {
+      appState.leafletMap.invalidateSize();
+    }
   });
 }
 
